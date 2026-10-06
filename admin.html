@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Portal | Payment Portal</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">PAYMENT<span>PORTAL</span></div>
+        <nav>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="entry.html">Payment Entry</a>
+            <a href="reports.html">Payment Reports</a>
+            <a href="agents.html">Agents</a>
+            <a href="clients.html">Clients</a>
+            <a href="accounts.html">Accounts</a>
+            <a class="active" href="admin.html">Admin</a>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()">
+                <span>Theme</span> <strong>Dark</strong>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">Administration</p>
+                <h1>System & Data Administration</h1>
+            </div>
+        </header>
+
+        <!-- Seamless Metrics Strip (NO BOXES) -->
+        <section class="grid" id="adminKpis">
+            <div class="stat"><small>Users</small><strong id="users">-</strong></div>
+            <div class="stat"><small>Payments Count</small><strong id="payments">-</strong></div>
+            <div class="stat"><small>Total USDT</small><strong id="aUsdt">-</strong></div>
+            <div class="stat"><small>Total INR</small><strong id="aInr" style="color:var(--accent);">-</strong></div>
+            <div class="stat"><small>Cash Handed Over</small><strong id="aCash" style="color:var(--danger);">-</strong></div>
+            <div class="stat"><small>Remaining Balance</small><strong id="aBal">-</strong></div>
+        </section>
+
+        <!-- Target Management for OPS and TL (Admin Only) -->
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Set Monthly Targets (OPS Managers & Team Leaders)</h2>
+                    <p class="panel-sub">Configure performance targets evaluated on the executive sales dashboard</p>
+                </div>
+            </div>
+            <form id="targetForm" class="form-grid" autocomplete="off">
+                <label>
+                    Target Type / Role
+                    <select name="type" id="targetType" required>
+                        <option value="OPS">Ops Manager (OPS)</option>
+                        <option value="TL">Team Leader (TL)</option>
+                    </select>
+                </label>
+                <label>
+                    Name
+                    <input name="name" id="targetName" placeholder="e.g. Arshad or Saif Shaikh" required>
+                </label>
+                <label>
+                    Monthly Target Amount (INR)
+                    <input name="target" type="number" step="1000" placeholder="e.g. 500000" required>
+                </label>
+                <div class="wide" style="display:flex; align-items:center; gap:12px;">
+                    <button type="submit" class="primary">Set Target</button>
+                    <span id="targetMsg" style="color:var(--accent); font-weight:600;"></span>
+                </div>
+            </form>
+
+            <div class="table-wrap" style="margin-top:14px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Role / Type</th>
+                            <th>Name</th>
+                            <th>Monthly Target (INR)</th>
+                            <th style="width:80px;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="targetList"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Import Excel Section -->
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Import Excel or CSV Sheet</h2>
+                    <p class="panel-sub">Upload your master Payment Sheet workbook (.xlsx or .csv) to sync all records locally</p>
+                </div>
+            </div>
+            <div class="form-grid" style="align-items:center; grid-template-columns: 1fr auto auto;">
+                <input type="file" id="importFile" accept=".xlsx, .xls, .csv">
+                <button id="importBtn" class="primary">Import Spreadsheet</button>
+                <button id="clearAllBtn" class="danger">Wipe All Records</button>
+            </div>
+        </section>
+
+        <!-- Create User Section -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Create System User</h2>
+            </div>
+            <form id="userForm" class="form-grid" autocomplete="off">
+                <label>User Full Name<input name="name" placeholder="e.g. John Doe" autocomplete="off" required></label>
+                <label>Email Address<input name="email" type="email" placeholder="user@company.com" autocomplete="off" required></label>
+                <label>Password<input name="password" type="password" placeholder="Enter password" autocomplete="new-password" required></label>
+                <label>Role
+                    <select name="role">
+                        <option value="ADMIN">Admin</option>
+                        <option value="OPS_MANAGER">Ops Manager</option>
+                        <option value="ENTRY_USER">Entry User</option>
+                    </select>
+                </label>
+                <div class="wide" style="display:flex; align-items:center; gap:12px;">
+                    <button type="submit" class="primary">Create User</button>
+                    <span id="userMsg" style="color:var(--accent); font-weight:600;"></span>
+                </div>
+            </form>
+        </section>
+
+        <!-- Existing Users Table -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Registered Users</h2>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User Name</th>
+                            <th>Email Address</th>
+                            <th>Role</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userList"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/admin.js"></script>
+</body>
+</html>

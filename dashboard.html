@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard | Payment Portal</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">PAYMENT<span>PORTAL</span></div>
+        <nav>
+            <a class="active" href="dashboard.html">Dashboard</a>
+            <a href="entry.html">Payment Entry</a>
+            <a href="reports.html">Payment Reports</a>
+            <a href="agents.html">Agents</a>
+            <a href="clients.html">Clients</a>
+            <a href="accounts.html">Accounts</a>
+            <a href="admin.html">Admin</a>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()">
+                <span>Theme</span> <strong>Dark</strong>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">Executive Analytics</p>
+                <h1>Sales & Target Dashboard</h1>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                <div id="monthPaceBadge"></div>
+                <div id="lastEntryBadge" style="font-size:11.5px; color:var(--text-muted);"></div>
+            </div>
+        </header>
+
+        <!-- Filters Bar -->
+        <section class="filters">
+            <label>
+                Month
+                <select id="monthFilter">
+                    <option value="overall">Overall (All Months)</option>
+                </select>
+            </label>
+            <label>
+                FTD Date
+                <input type="date" id="ftdDate" title="Select date for For-The-Day (FTD) calculation">
+            </label>
+            <button id="apply" class="primary">Apply Filter</button>
+            <button id="clearBtn" class="ghost">Clear Filter</button>
+            <button id="exportCsv" class="ghost">Export Reports</button>
+        </section>
+
+        <!-- Top KPIs Strip -->
+        <section class="kpi-grid" id="kpiGrid">
+            <div class="kpi-card">
+                <small>Total Month / Filter Sales</small>
+                <strong id="kpiInr">₹0.00</strong>
+                <div class="kpi-sub" id="kpiInrSub">0 Transactions</div>
+            </div>
+            <div class="kpi-card">
+                <small>Total USDT Volume</small>
+                <strong id="kpiUsdt">0.00</strong>
+                <div class="kpi-sub">Total Collected</div>
+            </div>
+            <div class="kpi-card">
+                <small>Direct P2P vs P2P</small>
+                <strong id="kpiModes">-</strong>
+                <div class="kpi-sub" id="kpiModesSub">Bifurcation</div>
+            </div>
+            <div class="kpi-card">
+                <small>Company Split (DV / WK)</small>
+                <strong id="kpiCompany">-</strong>
+                <div class="kpi-sub" id="kpiCompanySub">Digital Verse / World of Crypto</div>
+            </div>
+        </section>
+
+        <!-- Agents Leaderboard (Sheet 1) -->
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Agents Performance Report</h2>
+                    <p class="panel-sub">Month-to-Date (MTD) vs For-The-Day (FTD) Sales Leaderboard</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">Rank</th>
+                            <th>Emp Code</th>
+                            <th>Agent Name</th>
+                            <th>MTD / Filter Sales (INR)</th>
+                            <th>FTD Sales (INR)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agentTableBody"></tbody>
+                    <tfoot id="agentTableFoot"></tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- Team Leaders and Ops Managers side by side (Sheet 1) -->
+        <section class="two">
+            <!-- Team Leaders Report -->
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <h2>Team Leaders Report</h2>
+                        <p class="panel-sub">TL Grouped Sales & Targets</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">Rank</th>
+                                <th>TL Name</th>
+                                <th>MTD / Filter Sales</th>
+                                <th>FTD Sales</th>
+                                <th>Target</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tlTableBody"></tbody>
+                        <tfoot id="tlTableFoot"></tfoot>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Ops Managers Report -->
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <h2>Ops Managers Report</h2>
+                        <p class="panel-sub">Operations MTD & FTD Performance (Teams & Targets)</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">Rank</th>
+                                <th>Ops Manager</th>
+                                <th>TL Teams</th>
+                                <th>MTD / Filter Sales</th>
+                                <th>FTD Sales</th>
+                                <th>Target</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="opsTableBody"></tbody>
+                        <tfoot id="opsTableFoot"></tfoot>
+                    </table>
+                </div>
+            </section>
+        </section>
+
+        <!-- Payment Bifurcations (Sheet 4 in Excel) -->
+        <section class="two">
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <h2>Payment Mode Bifurcation (P2P vs D P2P)</h2>
+                        <p class="panel-sub">USDT & INR Breakdown by Mode</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Payment Mode</th>
+                                <th>Total USDT</th>
+                                <th>Total INR</th>
+                                <th>Transactions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modeTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <h2>Company Received In Bifurcation</h2>
+                        <p class="panel-sub">World of Crypto (WK) vs Digital Verse (DV)</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Received Company</th>
+                                <th>Total USDT</th>
+                                <th>Total INR</th>
+                                <th>Transactions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="companyTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/dashboard.js"></script>
+</body>
+</html>

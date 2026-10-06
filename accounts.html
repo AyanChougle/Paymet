@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Accounts Handover | Payment Portal</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">PAYMENT<span>PORTAL</span></div>
+        <nav>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="entry.html">Payment Entry</a>
+            <a href="reports.html">Payment Reports</a>
+            <a href="agents.html">Agents</a>
+            <a href="clients.html">Clients</a>
+            <a class="active" href="accounts.html">Accounts</a>
+            <a href="admin.html">Admin</a>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()">
+                <span>Theme</span> <strong>Dark</strong>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">Finance</p>
+                <h1>Accounts Handover & USDT Conversion Ledger</h1>
+            </div>
+        </header>
+
+        <!-- Seamless Metrics Strip (NO BOXES) -->
+        <section class="grid" id="accountsKpis">
+            <div class="stat"><small>Total Collected (INR)</small><strong id="totalInr">₹0.00</strong></div>
+            <div class="stat"><small>Total USDT Collected</small><strong id="totalUsdt">0.00</strong></div>
+            <div class="stat"><small>Cash Handed to Accounts</small><strong id="totalGiven" style="color:var(--danger)">₹0.00</strong></div>
+            <div class="stat"><small>Remaining Cash Balance</small><strong id="balance">₹0.00</strong></div>
+        </section>
+
+        <!-- Handover Form -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Record Cash Handover to Accounts</h2>
+            </div>
+            <form id="cashForm" class="form-grid">
+                <label>Handover Date<input name="date" type="date" required></label>
+                <label>Cash Amount Given (INR)<input name="amount" type="number" step="0.01" required></label>
+                <label class="wide">Reference / Remarks<input name="remarks" placeholder="Optional notes..."></label>
+                <div class="wide" style="display:flex; align-items:center; gap:12px;">
+                    <button type="submit" class="primary">Record Handover</button>
+                    <span id="msg" style="color:var(--accent); font-weight:600;"></span>
+                </div>
+            </form>
+        </section>
+
+        <!-- Handover Ledger Table -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Handover History Ledger</h2>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Cash Amount (INR)</th>
+                            <th>Reference / Remarks</th>
+                            <th style="width:80px;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ledgerList"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/accounts.js"></script>
+</body>
+</html>

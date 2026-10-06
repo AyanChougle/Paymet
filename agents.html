@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agents Directory | Payment Portal</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">PAYMENT<span>PORTAL</span></div>
+        <nav>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="entry.html">Payment Entry</a>
+            <a href="reports.html">Payment Reports</a>
+            <a class="active" href="agents.html">Agents</a>
+            <a href="clients.html">Clients</a>
+            <a href="accounts.html">Accounts</a>
+            <a href="admin.html">Admin</a>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()">
+                <span>Theme</span> <strong>Dark</strong>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">Directory</p>
+                <h1>Agents Directory</h1>
+            </div>
+        </header>
+
+        <!-- Add / Edit Mapping Form -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Add / Update Agent Mapping</h2>
+            </div>
+            <form id="mappingForm" class="form-grid" autocomplete="off">
+                <label>Employee Code (E-Code)<input name="ecode" placeholder="e.g. EMP-101" required></label>
+                <label>Agent Name<input name="agent_name" placeholder="e.g. Rohit Nikam" required></label>
+                <label>Ops Manager Name<input name="ops_manager" placeholder="e.g. Arshad"></label>
+                <label>Team Leader Name (TL)<input name="tl" placeholder="e.g. Saif Shaikh"></label>
+                <div class="wide" style="display:flex; align-items:center; gap:12px;">
+                    <button type="submit" class="primary">Save Agent Mapping</button>
+                    <span id="msg" style="color:var(--accent); font-weight:600;"></span>
+                </div>
+            </form>
+        </section>
+
+        <!-- Directory Table -->
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Configured Agents & Performance</h2>
+                    <p class="panel-sub">Auto-calculates current month sales from payment sheet</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>E-Code</th>
+                            <th>Agent Name</th>
+                            <th>Ops Manager</th>
+                            <th>Team Leader</th>
+                            <th>Current Month Sales</th>
+                            <th style="width:80px;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mappingList"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/agents.js"></script>
+</body>
+</html>

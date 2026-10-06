@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Clients Directory & Paid Clients | Payment Portal</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">PAYMENT<span>PORTAL</span></div>
+        <nav>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="entry.html">Payment Entry</a>
+            <a href="reports.html">Payment Reports</a>
+            <a href="agents.html">Agents</a>
+            <a class="active" href="clients.html">Clients</a>
+            <a href="accounts.html">Accounts</a>
+            <a href="admin.html">Admin</a>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()">
+                <span>Theme</span> <strong>Dark</strong>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">Client Management</p>
+                <h1>Clients & Paid Summary</h1>
+            </div>
+        </header>
+
+        <!-- Paid Clients Summary (Sheet 3 in Excel) -->
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Paid Clients Breakdown (Sheet 3)</h2>
+                    <p class="panel-sub">Aggregated INR Payments by Agent & Company Received (DV vs WK)</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Agent Name</th>
+                            <th>Client Name</th>
+                            <th>Client Number</th>
+                            <th>Email ID</th>
+                            <th>DV (Digital Verse)</th>
+                            <th>WK (World of Crypto)</th>
+                            <th>Grand Total (INR)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paidClientsBody"></tbody>
+                    <tfoot id="paidClientsFoot"></tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- Client Directory Add/Edit Form -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Add / Update Client Profile</h2>
+            </div>
+            <form id="clientForm" class="form-grid" autocomplete="off">
+                <label>Client Name<input name="client_name" placeholder="e.g. Ankit Virani" required></label>
+                <label>Client Phone Number<input name="client_number" placeholder="10-digit mobile" required></label>
+                <label>Email ID<input name="email_id" type="email" placeholder="client@example.com"></label>
+                <label>PAN Card Number<input name="pan_no" placeholder="ABCDE1234F" style="text-transform:uppercase;" maxlength="10"></label>
+                <label>Aadhar Card Number<input name="aadhar_no" placeholder="12-digit Aadhar" maxlength="16"></label>
+                <label>State / Region
+                    <select name="state">
+                        <option value="">Select State / UT</option>
+                        <option value="Andhra Pradesh">Andhra Pradesh</option>
+                        <option value="Arunachal Pradesh">Arunachal Pradesh</option>
+                        <option value="Assam">Assam</option>
+                        <option value="Bihar">Bihar</option>
+                        <option value="Chhattisgarh">Chhattisgarh</option>
+                        <option value="Goa">Goa</option>
+                        <option value="Gujarat">Gujarat</option>
+                        <option value="Haryana">Haryana</option>
+                        <option value="Himachal Pradesh">Himachal Pradesh</option>
+                        <option value="Jharkhand">Jharkhand</option>
+                        <option value="Karnataka">Karnataka</option>
+                        <option value="Kerala">Kerala</option>
+                        <option value="Madhya Pradesh">Madhya Pradesh</option>
+                        <option value="Maharashtra">Maharashtra</option>
+                        <option value="Manipur">Manipur</option>
+                        <option value="Meghalaya">Meghalaya</option>
+                        <option value="Mizoram">Mizoram</option>
+                        <option value="Nagaland">Nagaland</option>
+                        <option value="Odisha">Odisha</option>
+                        <option value="Punjab">Punjab</option>
+                        <option value="Rajasthan">Rajasthan</option>
+                        <option value="Sikkim">Sikkim</option>
+                        <option value="Tamil Nadu">Tamil Nadu</option>
+                        <option value="Telangana">Telangana</option>
+                        <option value="Tripura">Tripura</option>
+                        <option value="Uttar Pradesh">Uttar Pradesh</option>
+                        <option value="Uttarakhand">Uttarakhand</option>
+                        <option value="West Bengal">West Bengal</option>
+                        <option value="Delhi">Delhi</option>
+                        <option value="Chandigarh">Chandigarh</option>
+                        <option value="Jammu and Kashmir">Jammu and Kashmir</option>
+                        <option value="Ladakh">Ladakh</option>
+                        <option value="Puducherry">Puducherry</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </label>
+                <div class="wide" style="display:flex; align-items:center; gap:12px;">
+                    <button type="submit" class="primary">Save Client Profile</button>
+                    <span id="msg" style="color:var(--accent); font-weight:600;"></span>
+                </div>
+            </form>
+        </section>
+
+        <!-- Clients Master List -->
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Registered Client Directory</h2>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Phone Number</th>
+                            <th>Email</th>
+                            <th>PAN No</th>
+                            <th>Aadhar No</th>
+                            <th>State</th>
+                            <th style="width:80px;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientList"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/clients.js"></script>
+</body>
+</html>

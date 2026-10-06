@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Payment Reports | Payment Portal</title>
+    <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">PAYMENT<span>PORTAL</span></div>
+        <nav>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="entry.html">Payment Entry</a>
+            <a class="active" href="reports.html">Payment Reports</a>
+            <a href="agents.html">Agents</a>
+            <a href="clients.html">Clients</a>
+            <a href="accounts.html">Accounts</a>
+            <a href="admin.html">Admin</a>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()">
+                <span>Theme</span> <strong>Dark</strong>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header>
+            <div>
+                <p class="eyebrow">Records</p>
+                <h1>Payment Reports (Payment Sheet)</h1>
+            </div>
+            <button id="exportCsv" class="ghost">Export CSV</button>
+        </header>
+
+        <section class="filters">
+            <label>
+                Search
+                <input type="text" id="searchFilter" placeholder="Client, Agent, E-Code, Phone...">
+            </label>
+            <label>
+                From
+                <input type="date" id="from">
+            </label>
+            <label>
+                To
+                <input type="date" id="to">
+            </label>
+            <label>
+                Mode
+                <select id="modeFilter">
+                    <option value="">All Modes</option>
+                    <option value="P2P">P2P</option>
+                    <option value="D P2P">D P2P</option>
+                </select>
+            </label>
+            <label>
+                Company
+                <select id="companyFilter">
+                    <option value="">All Companies</option>
+                    <option value="Digital Verse">Digital Verse</option>
+                    <option value="World of Crypto">World of Crypto</option>
+                </select>
+            </label>
+            <button id="filterBtn" class="primary">Filter</button>
+            <button id="clearBtn" class="ghost">Clear</button>
+        </section>
+
+        <section class="panel">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:40px;">SR No</th>
+                            <th>Date</th>
+                            <th>E-Code</th>
+                            <th>Agent Name</th>
+                            <th>TL Name</th>
+                            <th>Ops Manager</th>
+                            <th>Client Name</th>
+                            <th>Client Number</th>
+                            <th>Email ID</th>
+                            <th>Payment Mode</th>
+                            <th>USDT</th>
+                            <th>INR Amount</th>
+                            <th>Ratio</th>
+                            <th>PAN NO</th>
+                            <th>AADHAR NO</th>
+                            <th>STATE</th>
+                            <th>Received Company</th>
+                            <th>Entered By</th>
+                            <th>Entry Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportTableBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination-bar">
+                <div id="pageInfo" class="text-muted" style="font-size:12px;">Showing 0 to 0 of 0 records</div>
+                <div class="pagination-controls">
+                    <label style="font-size:12px; color:var(--text-muted); margin-right:8px;">
+                        Rows per page:
+                        <select id="pageSize" style="width:auto; padding:4px 8px; margin-left:4px;">
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <button id="prevPage" class="ghost">Prev</button>
+                    <span id="pageNumber" style="font-weight:700; font-size:12px; padding:0 6px;">1</span>
+                    <button id="nextPage" class="ghost">Next</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/reports.js"></script>
+</body>
+</html>
