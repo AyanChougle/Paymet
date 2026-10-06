@@ -78,8 +78,17 @@
             </div>
         </section>
 
+        <!-- View Switcher Tabs -->
+        <div class="section-tabs" id="dashTabs">
+            <button class="tab-btn active" onclick="switchDashTab('all')">All Reports</button>
+            <button class="tab-btn" onclick="switchDashTab('agents')">Agents Report</button>
+            <button class="tab-btn" onclick="switchDashTab('tls')">Team Leaders</button>
+            <button class="tab-btn" onclick="switchDashTab('ops')">Ops Managers</button>
+            <button class="tab-btn" onclick="switchDashTab('bifurcation')">Bifurcations</button>
+        </div>
+
         <!-- Agents Leaderboard (Sheet 1) -->
-        <section class="panel">
+        <section class="panel tab-section" id="sec-agents">
             <div class="panel-head">
                 <div>
                     <h2>Agents Performance Report</h2>
@@ -104,9 +113,9 @@
         </section>
 
         <!-- Team Leaders and Ops Managers side by side (Sheet 1) -->
-        <section class="two">
+        <section class="two" id="sec-management">
             <!-- Team Leaders Report -->
-            <section class="panel">
+            <section class="panel tab-section" id="sec-tls">
                 <div class="panel-head">
                     <div>
                         <h2>Team Leaders Report</h2>
@@ -132,7 +141,7 @@
             </section>
 
             <!-- Ops Managers Report -->
-            <section class="panel">
+            <section class="panel tab-section" id="sec-ops">
                 <div class="panel-head">
                     <div>
                         <h2>Ops Managers Report</h2>
@@ -160,7 +169,7 @@
         </section>
 
         <!-- Payment Bifurcations (Sheet 4 in Excel) -->
-        <section class="two">
+        <section class="two tab-section" id="sec-bifurcation">
             <section class="panel">
                 <div class="panel-head">
                     <div>

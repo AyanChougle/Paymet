@@ -25,6 +25,46 @@ function getRoleTarget(type, name) {
     return found && found.target ? parseFloat(found.target) : 0;
 }
 
+// Tab Switching
+window.switchDashTab = function(tabName) {
+    document.querySelectorAll('#dashTabs .tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    const secAgents = document.getElementById('sec-agents');
+    const secMgmt = document.getElementById('sec-management');
+    const secTls = document.getElementById('sec-tls');
+    const secOps = document.getElementById('sec-ops');
+    const secBifur = document.getElementById('sec-bifurcation');
+
+    if (tabName === 'all') {
+        secAgents.style.display = 'block';
+        secMgmt.style.display = 'grid';
+        secTls.style.display = 'block';
+        secOps.style.display = 'block';
+        secBifur.style.display = 'grid';
+    } else if (tabName === 'agents') {
+        secAgents.style.display = 'block';
+        secMgmt.style.display = 'none';
+        secBifur.style.display = 'none';
+    } else if (tabName === 'tls') {
+        secAgents.style.display = 'none';
+        secMgmt.style.display = 'block';
+        secTls.style.display = 'block';
+        secOps.style.display = 'none';
+        secBifur.style.display = 'none';
+    } else if (tabName === 'ops') {
+        secAgents.style.display = 'none';
+        secMgmt.style.display = 'block';
+        secTls.style.display = 'none';
+        secOps.style.display = 'block';
+        secBifur.style.display = 'none';
+    } else if (tabName === 'bifurcation') {
+        secAgents.style.display = 'none';
+        secMgmt.style.display = 'none';
+        secBifur.style.display = 'grid';
+    }
+};
+
 async function load() {
     const res = await api('dashboard', {});
     const payments = res.rawPayments || [];
