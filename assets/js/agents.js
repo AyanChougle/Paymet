@@ -151,7 +151,7 @@ async function loadData() {
         const name = (p.agent_name || '').trim();
         if (name && !knownAgentNames.has(name.toLowerCase())) {
             mappings.push({
-                ecode: p.ecode || `AUTO-${100 + mappings.length + 1}`,
+                ecode: p.ecode || '',
                 agent_name: name,
                 ops_manager: p.ops_manager || '',
                 tl: p.tl || ''
@@ -744,7 +744,7 @@ if (importHierarchyFile) {
                             if (ecode) ex.ecode = ecode;
                             if (rep1) ex.reporting_to = rep1;
                         } else {
-                            opsList.push({ ecode: ecode || `OPS-${100 + opsList.length + 1}`, name: name, reporting_to: rep1 });
+                            opsList.push({ ecode: ecode || '', name: name, reporting_to: rep1 });
                             opsAdded++;
                         }
                     } else if (des.includes('team leader') || des.includes('tl')) {
@@ -754,7 +754,7 @@ if (importHierarchyFile) {
                             if (ecode) ex.ecode = ecode;
                             if (rep1) ex.ops_manager = rep1;
                         } else {
-                            tlList.push({ ecode: ecode || `TL-${100 + tlList.length + 1}`, name: name, ops_manager: rep1 });
+                            tlList.push({ ecode: ecode || '', name: name, ops_manager: rep1 });
                             tlAdded++;
                         }
                     } else {
@@ -765,7 +765,7 @@ if (importHierarchyFile) {
                             if (rep1) ex.tl = rep1;
                         } else {
                             mappings.push({
-                                ecode: ecode || `EMP-${100 + mappings.length + 1}`,
+                                ecode: ecode || '',
                                 agent_name: name,
                                 ops_manager: '',
                                 tl: rep1
@@ -820,7 +820,7 @@ if (importAgentsFile) {
                             if (ops) existing.ops_manager = ops;
                             if (tl) existing.tl = tl;
                         } else {
-                            mappings.push({ ecode: ecode || `EMP-${100 + mappings.length + 1}`, agent_name: name, ops_manager: ops, tl: tl });
+                            mappings.push({ ecode: ecode || '', agent_name: name, ops_manager: ops, tl: tl });
                         }
                         count++;
                     }

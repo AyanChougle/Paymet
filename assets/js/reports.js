@@ -216,49 +216,155 @@ if (importReportsFile) {
             try {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                
+                // Find Payment Sheet or default to first sheet
+                let targetSheetName = workbook.SheetNames[0];
+                for (const name of workbook.SheetNames) {
+                    const low = name.toLowerCase();
+                    if (low.includes('payment') || low.includes('sheet') || low.includes('oct') || low.includes('txn')) {
+                        targetSheetName = name;
+                        break;
+                    }
+                }
+
+                const sheet = workbook.Sheets[targetSheetName];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
                 let payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+                let agents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
+                let clients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+
                 let count = 0;
                 const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
 
-                rows.forEach((r, i) => {
-                    let d = r['Date'] || r['payment_date'] || new Date().toISOString().slice(0, 10);
-                    let ag = r['Agent Name'] || r['agent_name'] || 'Unassigned';
-                    let u = parseFloat(r['USDT'] || r['usdt'] || 0);
-                    let inr = parseFloat(r['INR Amount'] || r['inr_amount'] || 0);
+                rows.forEach((row, i) => {
+                    const dbData = {
+                        payment_date: '',
+                        ecode: '',
+                        agent_name: '',
+                        tl: '',
+                        ops_manager: '',
+                        client_name: '',
+                        client_number: '',
+                        email_id: '',
+                        payment_mode: 'P2P',
+                        usdt: 0,
+                        divided_by: 88,
+                        inr_amount: 0,
+                        ratio: '',
+                        pan_no: '',
+                        aadhar_no: '',
+                        state: '',
+                        received_in: 'Digital Verse',
+                        remarks: ''
+                    };
 
-                    if (ag) {
-                        payments.push({
-                            id: nextId + i,
-                            payment_date: d,
-                            ecode: r['E-Code'] || r['ecode'] || '',
-                            agent_name: ag,
-                            tl: r['TL Name'] || r['tl'] || '',
-                            ops_manager: r['Ops Manager'] || r['ops_manager'] || '',
-                            client_name: r['Client Name'] || r['client_name'] || '',
-                            client_number: r['Client Number'] || r['client_number'] || '',
-                            email_id: r['Email ID'] || r['email_id'] || '',
-                            payment_mode: r['Payment Mode'] || r['payment_mode'] || 'P2P',
-                            usdt: u,
-                            divided_by: parseFloat(r['Divided By'] || 88),
-                            inr_amount: inr || (u * 88),
-                            ratio: r['Ratio'] || '',
-                            pan_no: r['PAN NO'] || r['pan_no'] || '',
-                            aadhar_no: r['AADHAR NO'] || r['aadhar_no'] || '',
-                            state: r['STATE'] || r['state'] || '',
-                            received_in: r['Received Company'] || r['received_in'] || 'Digital Verse',
-                            created_by_name: 'Reports Importer',
-                            created_at: d + ' 12:00:00'
-                        });
+                    for (const key of Object.keys(row)) {
+                        const k = key.trim().toLowerCase();
+                        const val = String(row[key]).trim();
+
+                        if (k === 'date' || k.includes('payment date')) dbData.payment_date = row[key];
+                        else if (k === 'e-code' || k === 'ecode' || k.includes('emp code') || k === 'code') dbData.ecode = val;
+                        else if (k.includes('agent name') || k === 'agent' || k === 'name') dbData.agent_name = val;
+                        else if (k.includes('tl') || k.includes('team leader')) dbData.tl = val;
+                        else if (k.includes('ops') || k.includes('manager')) dbData.ops_manager = val;
+                        else if (k.includes('client name') || k === 'client') dbData.client_name = val;
+                        else if (k.includes('client number') || k.includes('phone') || k.includes('mobile')) dbData.client_number = val;
+                        else if (k.includes('email') || k.includes('mail')) dbData.email_id = val;
+                        else if (k.includes('mode') || k.includes('type')) dbData.payment_mode = val;
+                        else if (k === 'usdt' || k.includes('usdt')) dbData.usdt = row[key];
+                        else if (k.includes('divided') || k.includes('rate')) dbData.divided_by = row[key];
+                        else if (k.includes('inr amount') || k === 'inr' || k.includes('amount')) dbData.inr_amount = row[key];
+                        else if (k.includes('ratio')) dbData.ratio = val;
+                        else if (k.includes('pan')) dbData.pan_no = val;
+                        else if (k.includes('aadhar')) dbData.aadhar_no = val;
+                        else if (k.includes('state')) dbData.state = val;
+                        else if (k.includes('received company') || k.includes('received in') || k === 'company') dbData.received_in = val;
+                        else if (k.includes('remark') || k.includes('ref')) dbData.remarks = val;
+                    }
+
+                    // Date Normalization
+                    if (dbData.payment_date) {
+                        if (typeof dbData.payment_date === 'number') {
+                            const d = new Date(Math.round((dbData.payment_date - 25569) * 86400 * 1000));
+                            dbData.payment_date = d.toISOString().split('T')[0];
+                        } else {
+                            const strDate = String(dbData.payment_date).trim();
+                            if (strDate.includes('-')) {
+                                const parts = strDate.split('-');
+                                if (parts.length === 3) {
+                                    const monthNames = { 'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06', 'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12' };
+                                    const mKey = parts[1].toLowerCase().slice(0, 3);
+                                    if (monthNames[mKey]) {
+                                        let yr = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+                                        dbData.payment_date = `${yr}-${monthNames[mKey]}-${parts[0].padStart(2, '0')}`;
+                                    }
+                                }
+                            } else if (strDate.includes('/')) {
+                                const parts = strDate.split('/');
+                                if (parts.length === 3) {
+                                    let yr = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+                                    dbData.payment_date = `${yr}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!dbData.payment_date || String(dbData.payment_date).includes('NaN')) {
+                        dbData.payment_date = new Date().toISOString().split('T')[0];
+                    }
+
+                    if (dbData.agent_name || dbData.client_name || dbData.usdt || dbData.inr_amount) {
+                        const cleanNum = (v) => v ? parseFloat(String(v).replace(/[^0-9.-]+/g, '')) || 0 : 0;
+                        dbData.usdt = cleanNum(dbData.usdt);
+                        dbData.divided_by = cleanNum(dbData.divided_by) || 88;
+                        dbData.inr_amount = cleanNum(dbData.inr_amount) || Math.round((dbData.usdt * dbData.divided_by) * 100) / 100;
+                        dbData.payment_mode = (dbData.payment_mode || 'P2P').toUpperCase().includes('D') ? 'D P2P' : 'P2P';
+                        dbData.received_in = (dbData.received_in || '').toLowerCase().includes('world') || (dbData.received_in || '').toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
+
+                        dbData.id = nextId + i;
+                        dbData.created_by_name = 'Payment Sheet Import';
+                        dbData.created_at = dbData.payment_date + ' 12:00:00';
+
+                        payments.push(dbData);
                         count++;
+
+                        // Sync Agent
+                        if (dbData.agent_name) {
+                            const exA = agents.find(a => (a.agent_name || '').toLowerCase() === dbData.agent_name.toLowerCase());
+                            if (!exA) {
+                                agents.push({
+                                    ecode: dbData.ecode || `EMP-${100 + agents.length + 1}`,
+                                    agent_name: dbData.agent_name,
+                                    ops_manager: dbData.ops_manager || '',
+                                    tl: dbData.tl || ''
+                                });
+                            }
+                        }
+
+                        // Sync Client
+                        if (dbData.client_name) {
+                            const exC = clients.find(c => (c.client_name || '').toLowerCase() === dbData.client_name.toLowerCase());
+                            if (!exC) {
+                                clients.push({
+                                    client_name: dbData.client_name,
+                                    client_number: dbData.client_number || '',
+                                    email_id: dbData.email_id || '',
+                                    pan_no: dbData.pan_no || '',
+                                    aadhar_no: dbData.aadhar_no || '',
+                                    state: dbData.state || ''
+                                });
+                            }
+                        }
                     }
                 });
 
                 localStorage.setItem('pp_payments', JSON.stringify(payments));
+                localStorage.setItem('pp_agents', JSON.stringify(agents));
+                localStorage.setItem('pp_clients', JSON.stringify(clients));
+
                 await loadData();
-                alert(`Successfully imported ${count} payment records!`);
+                alert(`Successfully imported ${count} payment transactions into Payment Reports!`);
                 importReportsFile.value = '';
             } catch (err) {
                 alert('Import Error: ' + err.message);
