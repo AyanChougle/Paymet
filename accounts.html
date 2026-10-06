@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Accounts Handover | Payment Portal</title>
     <link rel="stylesheet" href="assets/css/app.css">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <aside class="sidebar">
@@ -30,6 +31,11 @@
             <div>
                 <p class="eyebrow">Finance</p>
                 <h1>Accounts Handover & USDT Conversion Ledger</h1>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <input type="file" id="importAccountsFile" accept=".xlsx, .xls" style="display:none;">
+                <button class="ghost" onclick="document.getElementById('importAccountsFile').click()">Import Ledger (.xlsx)</button>
+                <button id="exportAccountsBtn" class="btn-excel">Export Ledger (.xlsx)</button>
             </div>
         </header>
 

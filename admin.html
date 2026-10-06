@@ -32,6 +32,7 @@
                 <p class="eyebrow">Administration</p>
                 <h1>System & Data Administration</h1>
             </div>
+            <button id="exportBackupBtn" class="primary">Export Master Backup (.xlsx)</button>
         </header>
 
         <!-- Seamless Metrics Strip (NO BOXES) -->
@@ -42,6 +43,21 @@
             <div class="stat"><small>Total INR</small><strong id="aInr" style="color:var(--accent);">-</strong></div>
             <div class="stat"><small>Cash Handed Over</small><strong id="aCash" style="color:var(--danger);">-</strong></div>
             <div class="stat"><small>Remaining Balance</small><strong id="aBal">-</strong></div>
+        </section>
+
+        <!-- Master Importer Section -->
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Master Excel Importer & Auto-Bifurcation Engine</h2>
+                    <p class="panel-sub">Upload your raw master Excel sheet (.xlsx) — automatically extracts & populates Payments, Agents Directory, and Clients KYC across all pages</p>
+                </div>
+            </div>
+            <div class="form-grid" style="align-items:center; grid-template-columns: 1fr auto auto;">
+                <input type="file" id="importFile" accept=".xlsx, .xls">
+                <button id="importBtn" class="primary">Import Master Spreadsheet</button>
+                <button id="clearAllBtn" class="danger">Wipe All Records</button>
+            </div>
         </section>
 
         <!-- Target Management for OPS and TL (Admin Only) -->
@@ -86,21 +102,6 @@
                     </thead>
                     <tbody id="targetList"></tbody>
                 </table>
-            </div>
-        </section>
-
-        <!-- Import Excel Section -->
-        <section class="panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Import Excel or CSV Sheet</h2>
-                    <p class="panel-sub">Upload your master Payment Sheet workbook (.xlsx or .csv) to sync all records locally</p>
-                </div>
-            </div>
-            <div class="form-grid" style="align-items:center; grid-template-columns: 1fr auto auto;">
-                <input type="file" id="importFile" accept=".xlsx, .xls, .csv">
-                <button id="importBtn" class="primary">Import Spreadsheet</button>
-                <button id="clearAllBtn" class="danger">Wipe All Records</button>
             </div>
         </section>
 

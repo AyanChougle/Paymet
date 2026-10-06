@@ -7,6 +7,7 @@ const clearAllBtn = document.getElementById('clearAllBtn');
 const targetForm = document.getElementById('targetForm');
 const targetList = document.getElementById('targetList');
 const targetMsg = document.getElementById('targetMsg');
+const exportBackupBtn = document.getElementById('exportBackupBtn');
 
 const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInrInt = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
@@ -110,14 +111,16 @@ userForm.onsubmit = async e => {
     }
 };
 
-// Excel and CSV Import Logic
+// ==========================================
+// MASTER WORKBOOK IMPORTER (AUTO-BIFURCATOR)
+// ==========================================
 importBtn.onclick = function() {
     const file = importFile.files[0];
     if (!file) {
-        return alert('Please select an Excel or CSV file first.');
+        return alert('Please select an Excel (.xlsx, .xls) or CSV file first.');
     }
 
-    importBtn.textContent = 'Importing...';
+    importBtn.textContent = 'Importing & Bifurcating...';
     importBtn.disabled = true;
 
     const reader = new FileReader();
@@ -126,41 +129,55 @@ importBtn.onclick = function() {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
 
-            let sheetName = workbook.SheetNames.find(n => n.toLowerCase().includes('payment') || n.toLowerCase().includes('sheet')) || workbook.SheetNames[0];
-            const sheet = workbook.Sheets[sheetName];
+            // 1. Identify best sheet for raw payments (e.g. Payment Sheet, Payment, or Sheet 1)
+            let paymentSheetName = workbook.SheetNames.find(n => {
+                const ln = n.toLowerCase();
+                return ln.includes('payment sheet') || ln.includes('payment') || ln.includes('raw') || ln.includes('data');
+            }) || workbook.SheetNames[0];
+
+            const sheet = workbook.Sheets[paymentSheetName];
             const jsonRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-            if (jsonRows.length === 0) throw new Error('File is empty or contains no records.');
+            if (jsonRows.length === 0) throw new Error('Selected spreadsheet is empty or contains no records.');
 
-            let successCount = 0;
+            let payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+            let agents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
+            let clients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
 
-            for (let i = 0; i < jsonRows.length; i++) {
-                const row = jsonRows[i];
+            let newPaymentsCount = 0;
+            let newAgentsCount = 0;
+            let newClientsCount = 0;
+
+            const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
+
+            jsonRows.forEach((row, idx) => {
                 let dbData = {};
 
                 for (const key in row) {
                     const k = key.toLowerCase().trim();
-                    const val = row[key];
+                    const val = String(row[key] || '').trim();
 
-                    if (k === 'date' || k.includes('payment date')) dbData.payment_date = val;
-                    else if (k === 'agent name' || k.includes('agent')) dbData.agent_name = val;
+                    if (k === 'date' || k.includes('payment date')) dbData.payment_date = row[key];
                     else if (k.includes('emp code') || k.includes('e-code') || k === 'ecode') dbData.ecode = val;
+                    else if (k === 'agent name' || k.includes('agent')) dbData.agent_name = val;
                     else if (k.includes('ops manager') || k.includes('ops')) dbData.ops_manager = val;
                     else if (k === 'tl name' || k === 'tl' || k.includes('leader')) dbData.tl = val;
-                    else if (k.includes('mode') || k.includes('payment mode')) dbData.payment_mode = val;
-                    else if (k.includes('usdt')) dbData.usdt = val;
-                    else if (k.includes('divided')) dbData.divided_by = val;
-                    else if (k.includes('ratio')) dbData.ratio = val;
-                    else if (k.includes('received company') || k.includes('received in') || k === 'company') dbData.received_in = val;
                     else if (k.includes('client name') || k === 'client') dbData.client_name = val;
-                    else if (k.includes('client number') || k.includes('clientnumber') || k === 'number' || k.includes('phone')) dbData.client_number = val;
+                    else if (k.includes('client number') || k.includes('clientnumber') || k === 'number' || k.includes('phone') || k.includes('mobile')) dbData.client_number = val;
                     else if (k.includes('email')) dbData.email_id = val;
+                    else if (k.includes('mode') || k.includes('payment mode')) dbData.payment_mode = val;
+                    else if (k.includes('usdt')) dbData.usdt = row[key];
+                    else if (k.includes('divided') || k.includes('rate')) dbData.divided_by = row[key];
+                    else if (k.includes('inr amount') || k === 'inr' || k.includes('inr')) dbData.inr_amount = row[key];
+                    else if (k.includes('ratio')) dbData.ratio = val;
                     else if (k.includes('pan')) dbData.pan_no = val;
                     else if (k.includes('aadhar')) dbData.aadhar_no = val;
                     else if (k.includes('state')) dbData.state = val;
+                    else if (k.includes('received company') || k.includes('received in') || k === 'company') dbData.received_in = val;
                     else if (k.includes('remark') || k.includes('ref')) dbData.remarks = val;
                 }
 
+                // Date normalization
                 if (dbData.payment_date) {
                     if (typeof dbData.payment_date === 'number') {
                         const d = new Date(Math.round((dbData.payment_date - 25569) * 86400 * 1000));
@@ -187,38 +204,137 @@ importBtn.onclick = function() {
                     }
                 }
 
-                if (!dbData.payment_date || dbData.payment_date.includes('NaN')) {
+                if (!dbData.payment_date || String(dbData.payment_date).includes('NaN')) {
                     dbData.payment_date = new Date().toISOString().split('T')[0];
                 }
 
                 if (!dbData.agent_name) dbData.agent_name = 'Unassigned Agent';
 
-                const cleanNum = (val) => val ? String(val).replace(/[^0-9.-]+/g, '') : '0';
-                if (dbData.usdt) dbData.usdt = cleanNum(dbData.usdt);
-                if (dbData.divided_by) dbData.divided_by = cleanNum(dbData.divided_by) || '88';
+                const cleanNum = (v) => v ? parseFloat(String(v).replace(/[^0-9.-]+/g, '')) || 0 : 0;
+                dbData.usdt = cleanNum(dbData.usdt);
+                dbData.divided_by = cleanNum(dbData.divided_by) || 88;
+                dbData.inr_amount = cleanNum(dbData.inr_amount) || Math.round((dbData.usdt * dbData.divided_by) * 100) / 100;
+                dbData.payment_mode = (dbData.payment_mode || 'P2P').toUpperCase().includes('D') ? 'D P2P' : 'P2P';
+                dbData.received_in = (dbData.received_in || '').toLowerCase().includes('world') || (dbData.received_in || '').toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
 
-                await api('create_payment', dbData);
-                successCount++;
-            }
+                // Assign ID & Creator
+                dbData.id = nextId + idx;
+                dbData.created_by_name = 'Excel Master Import';
+                dbData.created_at = dbData.payment_date + ' 12:00:00';
 
-            alert(`Successfully imported ${successCount} payment records!`);
+                payments.push(dbData);
+                newPaymentsCount++;
+
+                // ==========================================
+                // BIFURCATION 1: AGENTS DIRECTORY AUTO-SYNC
+                // ==========================================
+                if (dbData.agent_name && dbData.agent_name !== 'Unassigned Agent') {
+                    const existingAgent = agents.find(a => (a.agent_name || '').toLowerCase() === dbData.agent_name.toLowerCase());
+                    if (!existingAgent) {
+                        agents.push({
+                            ecode: dbData.ecode || `EMP-${100 + agents.length + 1}`,
+                            agent_name: dbData.agent_name,
+                            ops_manager: dbData.ops_manager || '',
+                            tl: dbData.tl || ''
+                        });
+                        newAgentsCount++;
+                    } else {
+                        if (!existingAgent.ecode && dbData.ecode) existingAgent.ecode = dbData.ecode;
+                        if (!existingAgent.ops_manager && dbData.ops_manager) existingAgent.ops_manager = dbData.ops_manager;
+                        if (!existingAgent.tl && dbData.tl) existingAgent.tl = dbData.tl;
+                    }
+                }
+
+                // ==========================================
+                // BIFURCATION 2: CLIENTS DIRECTORY AUTO-SYNC
+                // ==========================================
+                if (dbData.client_name || dbData.client_number) {
+                    const cNum = dbData.client_number || '';
+                    const cName = dbData.client_name || '';
+                    const existingClient = clients.find(c => (cNum && c.client_number === cNum) || (cName && (c.client_name || '').toLowerCase() === cName.toLowerCase()));
+                    if (!existingClient) {
+                        clients.push({
+                            client_name: cName || 'Unknown Client',
+                            client_number: cNum || '-',
+                            email_id: dbData.email_id || '',
+                            pan_no: dbData.pan_no || '',
+                            aadhar_no: dbData.aadhar_no || '',
+                            state: dbData.state || ''
+                        });
+                        newClientsCount++;
+                    } else {
+                        if (!existingClient.email_id && dbData.email_id) existingClient.email_id = dbData.email_id;
+                        if (!existingClient.pan_no && dbData.pan_no) existingClient.pan_no = dbData.pan_no;
+                        if (!existingClient.aadhar_no && dbData.aadhar_no) existingClient.aadhar_no = dbData.aadhar_no;
+                        if (!existingClient.state && dbData.state) existingClient.state = dbData.state;
+                    }
+                }
+            });
+
+            // Save all bifurcated collections
+            localStorage.setItem('pp_payments', JSON.stringify(payments));
+            localStorage.setItem('pp_agents', JSON.stringify(agents));
+            localStorage.setItem('pp_clients', JSON.stringify(clients));
+
+            alert(`Master Import Successful!\n\n• ${newPaymentsCount} Payments Imported\n• ${newAgentsCount} New Agents Added to Directory\n• ${newClientsCount} New Clients Registered with KYC`);
             importFile.value = '';
             load();
         } catch (err) {
             alert('Import Error: ' + err.message);
         } finally {
-            importBtn.textContent = 'Import Spreadsheet';
+            importBtn.textContent = 'Import Master Spreadsheet';
             importBtn.disabled = false;
         }
     };
     reader.readAsArrayBuffer(file);
 };
 
+// ==========================================
+// MASTER EXPORTER (ALL MODULES IN 1 EXCEL)
+// ==========================================
+if (exportBackupBtn) {
+    exportBackupBtn.onclick = function() {
+        const wb = XLSX.utils.book_new();
+
+        const payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+        const agents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
+        const clients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+        const targets = JSON.parse(localStorage.getItem('pp_targets') || '[]');
+        const accounts = JSON.parse(localStorage.getItem('pp_accounts') || '[]');
+
+        // Sheet 1: Payments
+        const wsPayments = XLSX.utils.json_to_sheet(payments);
+        XLSX.utils.book_append_sheet(wb, wsPayments, 'Payment Sheet');
+
+        // Sheet 2: Agents
+        const wsAgents = XLSX.utils.json_to_sheet(agents);
+        XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Directory');
+
+        // Sheet 3: Clients
+        const wsClients = XLSX.utils.json_to_sheet(clients);
+        XLSX.utils.book_append_sheet(wb, wsClients, 'Clients Directory');
+
+        // Sheet 4: Targets
+        const wsTargets = XLSX.utils.json_to_sheet(targets);
+        XLSX.utils.book_append_sheet(wb, wsTargets, 'OPS & TL Targets');
+
+        // Sheet 5: Accounts Ledger
+        const wsAccounts = XLSX.utils.json_to_sheet(accounts);
+        XLSX.utils.book_append_sheet(wb, wsAccounts, 'Accounts Handover');
+
+        XLSX.writeFile(wb, `Master_Portal_Backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+}
+
 // Clear Data
 clearAllBtn.onclick = function() {
-    if (confirm('Are you sure you want to wipe all local payment records? This cannot be undone.')) {
+    if (confirm('Are you sure you want to wipe all local records across payments, agents, and clients? This cannot be undone.')) {
         localStorage.setItem('pp_payments', JSON.stringify([]));
-        alert('All payment records wiped.');
+        localStorage.setItem('pp_agents', JSON.stringify([]));
+        localStorage.setItem('pp_clients', JSON.stringify([]));
+        localStorage.setItem('pp_targets', JSON.stringify([]));
+        localStorage.setItem('pp_accounts', JSON.stringify([]));
+        alert('All portal records reset to zero.');
         load();
     }
 };

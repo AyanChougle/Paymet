@@ -3,8 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Agents Directory | Payment Portal</title>
+    <title>Hierarchy & Agents | Payment Portal</title>
     <link rel="stylesheet" href="assets/css/app.css">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <aside class="sidebar">
@@ -13,7 +14,7 @@
             <a href="dashboard.html">Dashboard</a>
             <a href="entry.html">Payment Entry</a>
             <a href="reports.html">Payment Reports</a>
-            <a class="active" href="agents.html">Agents</a>
+            <a class="active" href="agents.html">Agents & Hierarchy</a>
             <a href="clients.html">Clients</a>
             <a href="accounts.html">Accounts</a>
             <a href="admin.html">Admin</a>
@@ -28,51 +29,226 @@
     <main class="main">
         <header>
             <div>
-                <p class="eyebrow">Directory</p>
-                <h1>Agents Directory</h1>
+                <p class="eyebrow">Organization & Hierarchy</p>
+                <h1>Hierarchy & Agent Management</h1>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <input type="file" id="importHierarchyFile" accept=".xlsx, .xls" style="display:none;">
+                <input type="file" id="importAgentsFile" accept=".xlsx, .xls" style="display:none;">
+                
+                <button class="primary" onclick="document.getElementById('importHierarchyFile').click()">Import Hierarchy (.xlsx)</button>
+                <button class="ghost" onclick="document.getElementById('importAgentsFile').click()">Import Agents (.xlsx)</button>
+                <button id="exportHierarchyBtn" class="btn-excel">Export Hierarchy (.xlsx)</button>
+                <button id="exportAgentsBtn" class="ghost">Export Agents (.xlsx)</button>
             </div>
         </header>
 
-        <!-- Add / Edit Mapping Form -->
-        <section class="panel">
-            <div class="panel-head">
-                <h2>Add / Update Agent Mapping</h2>
+        <!-- KPI Strip -->
+        <section class="kpi-grid" style="margin-bottom: 20px;">
+            <div class="kpi-card">
+                <small>Ops Managers</small>
+                <strong id="kpiOpsCount">0</strong>
+                <div class="kpi-sub" id="kpiOpsSales">₹0.00 MTD</div>
             </div>
-            <form id="mappingForm" class="form-grid" autocomplete="off">
-                <label>Employee Code (E-Code)<input name="ecode" placeholder="e.g. EMP-101" required></label>
-                <label>Agent Name<input name="agent_name" placeholder="e.g. Rohit Nikam" required></label>
-                <label>Ops Manager Name<input name="ops_manager" placeholder="e.g. Arshad"></label>
-                <label>Team Leader Name (TL)<input name="tl" placeholder="e.g. Saif Shaikh"></label>
-                <div class="wide" style="display:flex; align-items:center; gap:12px;">
-                    <button type="submit" class="primary">Save Agent Mapping</button>
-                    <span id="msg" style="color:var(--accent); font-weight:600;"></span>
-                </div>
-            </form>
+            <div class="kpi-card">
+                <small>Team Leaders (TL)</small>
+                <strong id="kpiTlCount">0</strong>
+                <div class="kpi-sub" id="kpiTlSales">0 Teams</div>
+            </div>
+            <div class="kpi-card">
+                <small>Sales Agents</small>
+                <strong id="kpiAgentCount">0</strong>
+                <div class="kpi-sub" id="kpiActiveAgents">0 active this month</div>
+            </div>
+            <div class="kpi-card">
+                <small>Current Month Total Sales</small>
+                <strong id="kpiTotalSales" style="color:var(--accent);">₹0.00</strong>
+                <div class="kpi-sub" id="kpiMonthLabel">MTD Sales</div>
+            </div>
         </section>
 
-        <!-- Directory Table -->
-        <section class="panel">
+        <!-- Navigation Tabs -->
+        <div class="section-tabs" id="agentTabs">
+            <button class="tab-btn active" onclick="switchAgentTab('ops', this)">Ops Managers</button>
+            <button class="tab-btn" onclick="switchAgentTab('tls', this)">Team Leaders</button>
+            <button class="tab-btn" onclick="switchAgentTab('agents', this)">All Agents</button>
+            <button class="tab-btn" onclick="switchAgentTab('map', this)">Add / Map Member</button>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- TAB 1: OPS MANAGERS (Create OPS + Ops Hierarchy Reports) -->
+        <!-- ======================================================== -->
+        <section class="panel agent-tab-section" id="tab-ops">
+            <!-- Add Ops Manager Form -->
+            <div class="hierarchy-card" style="margin-bottom: 24px;">
+                <div class="panel-head" style="margin-bottom: 12px;">
+                    <div>
+                        <h2>Create / Update Ops Manager</h2>
+                        <p class="panel-sub">Add an Operations Manager with Employee Code, Reporting Level, and Monthly Sales Target</p>
+                    </div>
+                </div>
+                <form id="opsForm" class="form-grid" autocomplete="off">
+                    <label>
+                        Employee ID (EMP ID)
+                        <input name="ecode" id="opsEcode" placeholder="e.g. D02122" required>
+                    </label>
+                    <label>
+                        Ops Manager Full Name
+                        <input name="name" id="opsName" placeholder="e.g. Rushikesh Ravindra Budar" required>
+                    </label>
+                    <label>
+                        Reporting Level 1 (Manager / VP)
+                        <input name="reporting_to" id="opsReporting" placeholder="e.g. Akash T">
+                    </label>
+                    <label>
+                        Monthly Target (INR)
+                        <input name="target" id="opsTarget" type="number" step="1000" placeholder="e.g. 5000000">
+                    </label>
+                    <div class="wide" style="display:flex; align-items:center; gap:12px; margin-top:6px;">
+                        <button type="submit" class="primary">Save Ops Manager</button>
+                        <button type="button" class="ghost" onclick="resetOpsForm()">Clear</button>
+                        <span id="opsMsg" style="color:var(--accent); font-weight:600;"></span>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Ops Manager Reports & Teams List -->
             <div class="panel-head">
                 <div>
-                    <h2>Configured Agents & Performance</h2>
-                    <p class="panel-sub">Auto-calculates current month sales from payment sheet</p>
+                    <h2>Configured Ops Managers & Team Reports</h2>
+                    <p class="panel-sub">Breakdown of each Ops Manager, their assigned Team Leaders, and Agent Sales</p>
+                </div>
+            </div>
+            <div id="opsHierarchyContainer"></div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- TAB 2: TEAM LEADERS (Create TL + TL Hierarchy Reports)   -->
+        <!-- ======================================================== -->
+        <section class="panel agent-tab-section" id="tab-tls" style="display:none;">
+            <!-- Add Team Leader Form -->
+            <div class="hierarchy-card" style="margin-bottom: 24px;">
+                <div class="panel-head" style="margin-bottom: 12px;">
+                    <div>
+                        <h2>Create / Update Team Leader (TL)</h2>
+                        <p class="panel-sub">Add a Team Leader, assign to an Ops Manager, and set their monthly target</p>
+                    </div>
+                </div>
+                <form id="tlForm" class="form-grid" autocomplete="off">
+                    <label>
+                        Employee ID (EMP ID)
+                        <input name="ecode" id="tlEcode" placeholder="e.g. TL-201" required>
+                    </label>
+                    <label>
+                        Team Leader Full Name
+                        <input name="name" id="tlName" placeholder="e.g. Saif Shaikh" required>
+                    </label>
+                    <label>
+                        Reporting Ops Manager
+                        <input name="ops_manager" id="tlOpsManager" list="opsManagerList" placeholder="e.g. Arshad" required>
+                    </label>
+                    <label>
+                        Monthly Target (INR)
+                        <input name="target" id="tlTarget" type="number" step="1000" placeholder="e.g. 2000000">
+                    </label>
+                    <div class="wide" style="display:flex; align-items:center; gap:12px; margin-top:6px;">
+                        <button type="submit" class="primary">Save Team Leader</button>
+                        <button type="button" class="ghost" onclick="resetTlForm()">Clear</button>
+                        <span id="tlMsg" style="color:var(--accent); font-weight:600;"></span>
+                    </div>
+                </form>
+            </div>
+
+            <!-- TL Reports List -->
+            <div class="panel-head">
+                <div>
+                    <h2>Configured Team Leaders & Agents</h2>
+                    <p class="panel-sub">Each Team Leader with their reporting Ops Manager, monthly sales, and agent breakdown</p>
+                </div>
+            </div>
+            <div id="tlHierarchyContainer"></div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- TAB 3: ALL AGENTS DIRECTORY                              -->
+        <!-- ======================================================== -->
+        <section class="panel agent-tab-section" id="tab-agents" style="display:none;">
+            <div class="panel-head">
+                <div>
+                    <h2>All Agents Directory</h2>
+                    <p class="panel-sub">All sales agents with assigned Ops Managers, Team Leaders, and Month-to-Date sales</p>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="text" id="agentSearch" placeholder="Search agent, e-code, manager, TL..." style="min-width:260px; padding:6px 12px; font-size:12px;">
                 </div>
             </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
+                            <th style="width: 50px;">#</th>
                             <th>E-Code</th>
                             <th>Agent Name</th>
                             <th>Ops Manager</th>
-                            <th>Team Leader</th>
+                            <th>Team Leader (TL)</th>
                             <th>Current Month Sales</th>
-                            <th style="width:80px;">Action</th>
+                            <th>Transactions</th>
+                            <th style="width: 140px; text-align: right;">Action</th>
                         </tr>
                     </thead>
                     <tbody id="mappingList"></tbody>
+                    <tfoot id="mappingFoot"></tfoot>
                 </table>
             </div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- TAB 4: UNIFIED ADD / MAP MEMBER (Ops / TL / Agent)        -->
+        <!-- ======================================================== -->
+        <section class="panel agent-tab-section" id="tab-map" style="display:none;">
+            <div class="panel-head">
+                <div>
+                    <h2>Add / Map Organization Member</h2>
+                    <p class="panel-sub">Add or update any member (Ops Manager, Team Leader, or Sales Agent) in the hierarchy</p>
+                </div>
+            </div>
+            <form id="unifiedMemberForm" class="form-grid" autocomplete="off">
+                <label>
+                    Role / Designation
+                    <select name="designation" id="inputDesignation" onchange="onDesignationChange()">
+                        <option value="AGENT">Sales Agent</option>
+                        <option value="OPS">Operations Manager</option>
+                        <option value="TL">Team Leader (TL)</option>
+                    </select>
+                </label>
+                <label>
+                    Employee ID (EMP ID)
+                    <input name="ecode" id="inputEcode" placeholder="e.g. D02122" required>
+                </label>
+                <label>
+                    Full Name
+                    <input name="name" id="inputName" placeholder="e.g. Rohit Nikam" required>
+                </label>
+                <label id="grpOpsManager">
+                    Ops Manager Name
+                    <input name="ops_manager" id="inputOpsManager" list="opsManagerList" placeholder="e.g. Rushikesh Ravindra Budar">
+                    <datalist id="opsManagerList"></datalist>
+                </label>
+                <label id="grpTlName">
+                    Team Leader Name (TL)
+                    <input name="tl" id="inputTlName" list="tlList" placeholder="e.g. Akash T">
+                    <datalist id="tlList"></datalist>
+                </label>
+                <label id="grpTarget" style="display:none;">
+                    Monthly Target (INR)
+                    <input name="target" id="inputMemberTarget" type="number" step="1000" placeholder="e.g. 3000000">
+                </label>
+                <div class="wide" style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+                    <button type="submit" class="primary">Save Member to Hierarchy</button>
+                    <button type="button" class="ghost" onclick="resetUnifiedForm()">Clear Form</button>
+                    <span id="unifiedMsg" style="color:var(--accent); font-weight:600;"></span>
+                </div>
+            </form>
         </section>
     </main>
 

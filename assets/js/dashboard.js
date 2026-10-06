@@ -2,7 +2,7 @@ const monthFilter = document.getElementById('monthFilter');
 const ftdDate = document.getElementById('ftdDate');
 const applyBtn = document.getElementById('apply');
 const clearBtn = document.getElementById('clearBtn');
-const exportCsvBtn = document.getElementById('exportCsv');
+const exportExcelBtn = document.getElementById('exportExcelBtn');
 
 // Set default FTD date to today
 ftdDate.value = new Date().toISOString().slice(0, 10);
@@ -26,9 +26,13 @@ function getRoleTarget(type, name) {
 }
 
 // Tab Switching
-window.switchDashTab = function(tabName) {
+window.switchDashTab = function(tabName, el) {
     document.querySelectorAll('#dashTabs .tab-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    if (el) {
+        el.classList.add('active');
+    } else if (window.event && window.event.target) {
+        window.event.target.classList.add('active');
+    }
 
     const secAgents = document.getElementById('sec-agents');
     const secMgmt = document.getElementById('sec-management');
@@ -37,31 +41,31 @@ window.switchDashTab = function(tabName) {
     const secBifur = document.getElementById('sec-bifurcation');
 
     if (tabName === 'all') {
-        secAgents.style.display = 'block';
-        secMgmt.style.display = 'grid';
-        secTls.style.display = 'block';
-        secOps.style.display = 'block';
-        secBifur.style.display = 'grid';
+        if (secAgents) secAgents.style.display = 'block';
+        if (secMgmt) secMgmt.style.display = 'grid';
+        if (secTls) secTls.style.display = 'block';
+        if (secOps) secOps.style.display = 'block';
+        if (secBifur) secBifur.style.display = 'grid';
     } else if (tabName === 'agents') {
-        secAgents.style.display = 'block';
-        secMgmt.style.display = 'none';
-        secBifur.style.display = 'none';
+        if (secAgents) secAgents.style.display = 'block';
+        if (secMgmt) secMgmt.style.display = 'none';
+        if (secBifur) secBifur.style.display = 'none';
     } else if (tabName === 'tls') {
-        secAgents.style.display = 'none';
-        secMgmt.style.display = 'block';
-        secTls.style.display = 'block';
-        secOps.style.display = 'none';
-        secBifur.style.display = 'none';
+        if (secAgents) secAgents.style.display = 'none';
+        if (secMgmt) secMgmt.style.display = 'block';
+        if (secTls) secTls.style.display = 'block';
+        if (secOps) secOps.style.display = 'none';
+        if (secBifur) secBifur.style.display = 'none';
     } else if (tabName === 'ops') {
-        secAgents.style.display = 'none';
-        secMgmt.style.display = 'block';
-        secTls.style.display = 'none';
-        secOps.style.display = 'block';
-        secBifur.style.display = 'none';
+        if (secAgents) secAgents.style.display = 'none';
+        if (secMgmt) secMgmt.style.display = 'block';
+        if (secTls) secTls.style.display = 'none';
+        if (secOps) secOps.style.display = 'block';
+        if (secBifur) secBifur.style.display = 'none';
     } else if (tabName === 'bifurcation') {
-        secAgents.style.display = 'none';
-        secMgmt.style.display = 'none';
-        secBifur.style.display = 'grid';
+        if (secAgents) secAgents.style.display = 'none';
+        if (secMgmt) secMgmt.style.display = 'none';
+        if (secBifur) secBifur.style.display = 'grid';
     }
 };
 
@@ -335,46 +339,65 @@ clearBtn.onclick = () => {
     load();
 };
 
-exportCsvBtn.onclick = () => {
-    if (!window.currentReportData) return;
-    const { sortedAgents, sortedTLs, sortedOps, modeMap, compMap, selMonth } = window.currentReportData;
+// Export Summary Excel (.xlsx) Multi-Sheet
+if (exportExcelBtn) {
+    exportExcelBtn.onclick = function() {
+        if (!window.currentReportData) return alert('No report data to export.');
+        const { sortedAgents, sortedTLs, sortedOps, modeMap, compMap, selMonth } = window.currentReportData;
 
-    let csv = [`SALES & TARGET SUMMARY REPORT (${selMonth.toUpperCase()})\n`];
+        const wb = XLSX.utils.book_new();
 
-    csv.push('--- AGENTS PERFORMANCE ---');
-    csv.push('Rank,Emp Code,Agent Name,MTD Sales (INR),FTD Sales (INR)');
-    sortedAgents.forEach((a, i) => {
-        const ecode = getAgentEcode(a.name);
-        csv.push(`${i+1},"${ecode}","${a.name}",${a.mtd},${a.ftd}`);
-    });
+        // Sheet 1: Agents Report
+        const wsAgents = XLSX.utils.json_to_sheet(sortedAgents.map((a, i) => ({
+            'Rank': i + 1,
+            'Emp Code': getAgentEcode(a.name),
+            'Agent Name': a.name,
+            'MTD / Filter Sales (INR)': a.mtd,
+            'FTD Sales (INR)': a.ftd
+        })));
+        XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Performance');
 
-    csv.push('\n--- TEAM LEADERS REPORT ---');
-    csv.push('Rank,TL Name,MTD Sales (INR),FTD Sales (INR),Target');
-    sortedTLs.forEach((t, i) => {
-        const target = getRoleTarget('TL', t.name);
-        csv.push(`${i+1},"${t.name}",${t.mtd},${t.ftd},${target}`);
-    });
+        // Sheet 2: Team Leaders Report
+        const wsTLs = XLSX.utils.json_to_sheet(sortedTLs.map((t, i) => ({
+            'Rank': i + 1,
+            'TL Name': t.name,
+            'MTD / Filter Sales (INR)': t.mtd,
+            'FTD Sales (INR)': t.ftd,
+            'Monthly Target': getRoleTarget('TL', t.name)
+        })));
+        XLSX.utils.book_append_sheet(wb, wsTLs, 'Team Leaders');
 
-    csv.push('\n--- OPS MANAGERS REPORT ---');
-    csv.push('Rank,Ops Manager,TL Teams,MTD Sales (INR),FTD Sales (INR),Target');
-    sortedOps.forEach((o, i) => {
-        const target = getRoleTarget('OPS', o.name);
-        csv.push(`${i+1},"${o.name}",${o.teams.size},${o.mtd},${o.ftd},${target}`);
-    });
+        // Sheet 3: Ops Managers Report
+        const wsOps = XLSX.utils.json_to_sheet(sortedOps.map((o, i) => ({
+            'Rank': i + 1,
+            'Ops Manager': o.name,
+            'TL Teams Count': o.teams.size,
+            'MTD / Filter Sales (INR)': o.mtd,
+            'FTD Sales (INR)': o.ftd,
+            'Monthly Target': getRoleTarget('OPS', o.name)
+        })));
+        XLSX.utils.book_append_sheet(wb, wsOps, 'Ops Managers');
 
-    csv.push('\n--- PAYMENT MODE BIFURCATION ---');
-    csv.push('Mode,USDT,INR,Transactions');
-    Object.entries(modeMap).forEach(([m, d]) => csv.push(`"${m}",${d.usdt},${d.inr},${d.count}`));
+        // Sheet 4: Payment Mode Bifurcation
+        const wsMode = XLSX.utils.json_to_sheet(Object.entries(modeMap).map(([mode, data]) => ({
+            'Payment Mode': mode,
+            'Total USDT': data.usdt,
+            'Total INR': data.inr,
+            'Transactions': data.count
+        })));
+        XLSX.utils.book_append_sheet(wb, wsMode, 'Payment Mode Bifurcation');
 
-    csv.push('\n--- COMPANY BIFURCATION ---');
-    csv.push('Company,USDT,INR,Transactions');
-    Object.entries(compMap).forEach(([c, d]) => csv.push(`"${c}",${d.usdt},${d.inr},${d.count}`));
+        // Sheet 5: Company Bifurcation
+        const wsComp = XLSX.utils.json_to_sheet(Object.entries(compMap).map(([comp, data]) => ({
+            'Received Company': comp,
+            'Total USDT': data.usdt,
+            'Total INR': data.inr,
+            'Transactions': data.count
+        })));
+        XLSX.utils.book_append_sheet(wb, wsComp, 'Company Bifurcation');
 
-    const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Sales_Summary_${selMonth}.csv`;
-    a.click();
-};
+        XLSX.writeFile(wb, `Sales_Summary_Workbook_${selMonth}.xlsx`);
+    };
+}
 
 load().catch(err => console.error(err));

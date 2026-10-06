@@ -5,7 +5,8 @@ const modeFilter = document.getElementById('modeFilter');
 const companyFilter = document.getElementById('companyFilter');
 const filterBtn = document.getElementById('filterBtn');
 const clearBtn = document.getElementById('clearBtn');
-const exportCsvBtn = document.getElementById('exportCsv');
+const exportExcelBtn = document.getElementById('exportExcelBtn');
+const importReportsFile = document.getElementById('importReportsFile');
 const pageSizeSelect = document.getElementById('pageSize');
 const prevPageBtn = document.getElementById('prevPage');
 const nextPageBtn = document.getElementById('nextPage');
@@ -170,64 +171,101 @@ nextPageBtn.onclick = () => {
     renderTable();
 };
 
-exportCsvBtn.onclick = () => {
-    if (!filteredRows.length) return alert('No data to export.');
+// Export Excel (.xlsx)
+if (exportExcelBtn) {
+    exportExcelBtn.onclick = function() {
+        if (!filteredRows.length) return alert('No records to export.');
 
-    const headers = [
-        'SR No',
-        'Date',
-        'E-Code',
-        'Agent Name',
-        'TL Name',
-        'Ops Manager',
-        'Client Name',
-        'Client Number',
-        'Email ID',
-        'Payment Mode',
-        'USDT',
-        'INR Amount',
-        'Ratio',
-        'PAN NO',
-        'AADHAR NO',
-        'STATE',
-        'Received Company',
-        'Entered By',
-        'Entry Timestamp'
-    ];
+        const exportData = filteredRows.map((r, idx) => ({
+            'SR No': idx + 1,
+            'Date': r.payment_date || '',
+            'E-Code': r.ecode || getAgentEcode(r.agent_name),
+            'Agent Name': r.agent_name || '',
+            'TL Name': r.tl || '',
+            'Ops Manager': r.ops_manager || getAgentOps(r.agent_name),
+            'Client Name': r.client_name || '',
+            'Client Number': r.client_number || '',
+            'Email ID': r.email_id || '',
+            'Payment Mode': r.payment_mode || 'P2P',
+            'USDT': parseFloat(r.usdt || 0),
+            'INR Amount': parseFloat(r.inr_amount || 0),
+            'Ratio': r.ratio || '',
+            'PAN NO': r.pan_no || '',
+            'AADHAR NO': r.aadhar_no || '',
+            'STATE': r.state || '',
+            'Received Company': r.received_in || '',
+            'Entered By': r.created_by_name || '',
+            'Entry Timestamp': r.created_at || ''
+        }));
 
-    const lines = [headers.join(',')];
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Payment Sheet');
+        XLSX.writeFile(wb, `Payment_Sheet_Export_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+}
 
-    filteredRows.forEach((r, idx) => {
-        const ecode = r.ecode || getAgentEcode(r.agent_name);
-        const ops = r.ops_manager || getAgentOps(r.agent_name);
-        lines.push([
-            idx + 1,
-            `"${r.payment_date || ''}"`,
-            `"${ecode}"`,
-            `"${r.agent_name || ''}"`,
-            `"${r.tl || ''}"`,
-            `"${ops}"`,
-            `"${r.client_name || ''}"`,
-            `"${r.client_number || ''}"`,
-            `"${r.email_id || ''}"`,
-            `"${r.payment_mode || ''}"`,
-            r.usdt || 0,
-            r.inr_amount || 0,
-            `"${r.ratio || ''}"`,
-            `"${r.pan_no || ''}"`,
-            `"${r.aadhar_no || ''}"`,
-            `"${r.state || ''}"`,
-            `"${r.received_in || ''}"`,
-            `"${r.created_by_name || ''}"`,
-            `"${r.created_at || ''}"`
-        ].join(','));
-    });
+// Import Payments Excel
+if (importReportsFile) {
+    importReportsFile.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
 
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Payment_Sheet_Report_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-};
+        const reader = new FileReader();
+        reader.onload = async function(evt) {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+                let payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+                let count = 0;
+                const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
+
+                rows.forEach((r, i) => {
+                    let d = r['Date'] || r['payment_date'] || new Date().toISOString().slice(0, 10);
+                    let ag = r['Agent Name'] || r['agent_name'] || 'Unassigned';
+                    let u = parseFloat(r['USDT'] || r['usdt'] || 0);
+                    let inr = parseFloat(r['INR Amount'] || r['inr_amount'] || 0);
+
+                    if (ag) {
+                        payments.push({
+                            id: nextId + i,
+                            payment_date: d,
+                            ecode: r['E-Code'] || r['ecode'] || '',
+                            agent_name: ag,
+                            tl: r['TL Name'] || r['tl'] || '',
+                            ops_manager: r['Ops Manager'] || r['ops_manager'] || '',
+                            client_name: r['Client Name'] || r['client_name'] || '',
+                            client_number: r['Client Number'] || r['client_number'] || '',
+                            email_id: r['Email ID'] || r['email_id'] || '',
+                            payment_mode: r['Payment Mode'] || r['payment_mode'] || 'P2P',
+                            usdt: u,
+                            divided_by: parseFloat(r['Divided By'] || 88),
+                            inr_amount: inr || (u * 88),
+                            ratio: r['Ratio'] || '',
+                            pan_no: r['PAN NO'] || r['pan_no'] || '',
+                            aadhar_no: r['AADHAR NO'] || r['aadhar_no'] || '',
+                            state: r['STATE'] || r['state'] || '',
+                            received_in: r['Received Company'] || r['received_in'] || 'Digital Verse',
+                            created_by_name: 'Reports Importer',
+                            created_at: d + ' 12:00:00'
+                        });
+                        count++;
+                    }
+                });
+
+                localStorage.setItem('pp_payments', JSON.stringify(payments));
+                await loadData();
+                alert(`Successfully imported ${count} payment records!`);
+                importReportsFile.value = '';
+            } catch (err) {
+                alert('Import Error: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+}
 
 loadData().catch(e => console.error(e));

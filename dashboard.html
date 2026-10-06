@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard | Payment Portal</title>
     <link rel="stylesheet" href="assets/css/app.css">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <aside class="sidebar">
@@ -51,7 +52,7 @@
             </label>
             <button id="apply" class="primary">Apply Filter</button>
             <button id="clearBtn" class="ghost">Clear Filter</button>
-            <button id="exportCsv" class="ghost">Export Reports</button>
+            <button id="exportExcelBtn" class="btn-excel">Export Summary Excel (.xlsx)</button>
         </section>
 
         <!-- Top KPIs Strip -->
@@ -80,11 +81,11 @@
 
         <!-- View Switcher Tabs -->
         <div class="section-tabs" id="dashTabs">
-            <button class="tab-btn active" onclick="switchDashTab('all')">All Reports</button>
-            <button class="tab-btn" onclick="switchDashTab('agents')">Agents Report</button>
-            <button class="tab-btn" onclick="switchDashTab('tls')">Team Leaders</button>
-            <button class="tab-btn" onclick="switchDashTab('ops')">Ops Managers</button>
-            <button class="tab-btn" onclick="switchDashTab('bifurcation')">Bifurcations</button>
+            <button class="tab-btn active" onclick="switchDashTab('all', this)">All Reports</button>
+            <button class="tab-btn" onclick="switchDashTab('agents', this)">Agents Report</button>
+            <button class="tab-btn" onclick="switchDashTab('tls', this)">Team Leaders</button>
+            <button class="tab-btn" onclick="switchDashTab('ops', this)">Ops Managers</button>
+            <button class="tab-btn" onclick="switchDashTab('bifurcation', this)">Bifurcations</button>
         </div>
 
         <!-- Agents Leaderboard (Sheet 1) -->

@@ -1,6 +1,9 @@
 const form = document.getElementById('cashForm');
 const list = document.getElementById('ledgerList');
 const msg = document.getElementById('msg');
+const importAccountsFile = document.getElementById('importAccountsFile');
+const exportAccountsBtn = document.getElementById('exportAccountsBtn');
+
 form.date.value = new Date().toISOString().slice(0, 10);
 
 const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -70,5 +73,58 @@ form.onsubmit = e => {
     msg.textContent = 'Handover entry saved!';
     setTimeout(() => msg.textContent = '', 3000);
 };
+
+// Import Handover Ledger
+if (importAccountsFile) {
+    importAccountsFile.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+                let ledger = getLedger();
+                let count = 0;
+
+                rows.forEach(r => {
+                    let d = r['Date'] || r['date'] || r['Handover Date'] || '';
+                    let amt = parseFloat(r['Cash Amount (INR)'] || r['Amount'] || r['amount'] || 0);
+                    let rem = r['Reference / Remarks'] || r['Remarks'] || r['remarks'] || '';
+
+                    if (amt > 0) {
+                        ledger.push({ date: d || new Date().toISOString().slice(0, 10), amount: amt, remarks: rem });
+                        count++;
+                    }
+                });
+
+                saveLedger(ledger);
+                render();
+                alert(`Successfully imported ${count} handover ledger entries!`);
+                importAccountsFile.value = '';
+            } catch (err) {
+                alert('Import Error: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+}
+
+// Export Handover Ledger
+if (exportAccountsBtn) {
+    exportAccountsBtn.onclick = function() {
+        const ledger = getLedger();
+        if (!ledger.length) return alert('No ledger records to export.');
+
+        const ws = XLSX.utils.json_to_sheet(ledger);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Accounts Handover');
+        XLSX.writeFile(wb, `Accounts_Handover_Ledger_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+}
 
 render();

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Clients Directory & Paid Clients | Payment Portal</title>
     <link rel="stylesheet" href="assets/css/app.css">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <aside class="sidebar">
@@ -30,6 +31,11 @@
             <div>
                 <p class="eyebrow">Client Management</p>
                 <h1>Clients & Paid Summary</h1>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <input type="file" id="importClientsFile" accept=".xlsx, .xls" style="display:none;">
+                <button class="ghost" onclick="document.getElementById('importClientsFile').click()">Import Clients (.xlsx)</button>
+                <button id="exportClientsBtn" class="btn-excel">Export Clients & KYC (.xlsx)</button>
             </div>
         </header>
 
