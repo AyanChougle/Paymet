@@ -187,6 +187,16 @@ async function loadData() {
         m.txCount = agPayments.length;
     });
 
+    // Auto-correct missing or misaligned ops_managers from TL relationships
+    mappings.forEach(m => {
+        if (m.tl) {
+            const tlObj = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === m.tl.trim().toLowerCase());
+            if (tlObj && tlObj.ops_manager) {
+                m.ops_manager = tlObj.ops_manager.trim();
+            }
+        }
+    });
+
     cachedMappings = mappings;
     saveMappings(mappings);
 
@@ -350,6 +360,7 @@ function renderOpsHierarchy(mappings) {
                     <div class="hierarchy-meta-item">Target: <strong>${ops.target > 0 ? fmtInrInt(ops.target) : '-'}</strong></div>
                     <div class="hierarchy-meta-item">${renderTargetStatus(ops.totalSales, ops.target)}</div>
                     <button class="ghost" style="padding:4px 10px; font-size:11px;" onclick="editOps('${ops.name}')">Edit Ops</button>
+                    ${ops.name !== 'Unassigned Ops Manager' ? `<button class="ghost danger" style="padding:4px 10px; font-size:11px; color:var(--danger);" onclick="deleteOps('${ops.name}')">Delete</button>` : ''}
                 </div>
             </div>
 
@@ -473,6 +484,7 @@ function renderTlHierarchy(mappings) {
                     <div class="hierarchy-meta-item">Target: <strong>${tl.target > 0 ? fmtInrInt(tl.target) : '-'}</strong></div>
                     <div class="hierarchy-meta-item">${renderTargetStatus(tl.totalSales, tl.target)}</div>
                     <button class="ghost" style="padding:4px 10px; font-size:11px;" onclick="editTl('${tl.name}')">Edit TL</button>
+                    ${tl.name !== 'Unassigned TL' && tl.name !== 'Direct / Unassigned TL' ? `<button class="ghost danger" style="padding:4px 10px; font-size:11px; color:var(--danger);" onclick="deleteTl('${tl.name}')">Delete</button>` : ''}
                 </div>
             </div>
 
@@ -700,6 +712,49 @@ window.deleteAgent = function(idx) {
     if (confirm(`Delete agent ${m.agent_name}?`)) {
         let mappings = getMappings();
         mappings = mappings.filter(item => (item.agent_name || '').toLowerCase() !== (m.agent_name || '').toLowerCase());
+        saveMappings(mappings);
+        loadData();
+    }
+};
+
+window.deleteOps = function(name) {
+    if (confirm(`Delete Ops Manager ${name}?\n(Agents will remain in the directory but their ops manager will be unassigned)`)) {
+        let opsList = getOpsManagers();
+        opsList = opsList.filter(o => (o.name || '').toLowerCase() !== name.toLowerCase());
+        saveOpsManagers(opsList);
+        
+        let mappings = getMappings();
+        mappings.forEach(m => {
+            if ((m.ops_manager || '').toLowerCase() === name.toLowerCase()) {
+                m.ops_manager = '';
+            }
+        });
+        saveMappings(mappings);
+        
+        let tlList = getTeamLeaders();
+        tlList.forEach(t => {
+            if ((t.ops_manager || '').toLowerCase() === name.toLowerCase()) {
+                t.ops_manager = '';
+            }
+        });
+        saveTeamLeaders(tlList);
+        
+        loadData();
+    }
+};
+
+window.deleteTl = function(name) {
+    if (confirm(`Delete Team Leader ${name}?\n(Agents will remain in the directory but their TL will be unassigned)`)) {
+        let tlList = getTeamLeaders();
+        tlList = tlList.filter(t => (t.name || '').toLowerCase() !== name.toLowerCase());
+        saveTeamLeaders(tlList);
+        
+        let mappings = getMappings();
+        mappings.forEach(m => {
+            if ((m.tl || '').toLowerCase() === name.toLowerCase()) {
+                m.tl = '';
+            }
+        });
         saveMappings(mappings);
         loadData();
     }
