@@ -100,6 +100,15 @@ async function load() {
             monthFilter.appendChild(opt);
         });
 
+        const currentM = new Date().toISOString().slice(0, 7);
+        if (!sortedMonths.includes(currentM)) {
+            const opt = document.createElement('option');
+            opt.value = currentM;
+            const [y, mon] = currentM.split('-');
+            const d = new Date(parseInt(y), parseInt(mon) - 1, 1);
+            opt.textContent = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+            monthFilter.appendChild(opt);
+        }
         monthFilter.value = 'overall';
     }
 
@@ -144,6 +153,71 @@ async function load() {
         }
     }
 
+    // Aggregations
+    let totalInr = 0;
+    let totalUsdt = 0;
+    let totalTx = 0;
+
+    const agentMap = {};
+    const tlMap = {};
+    const opsMap = {};
+    const modeMap = { 'P2P': { usdt: 0, inr: 0, count: 0 }, 'D P2P': { usdt: 0, inr: 0, count: 0 } };
+    const compMap = { 'Digital Verse': { usdt: 0, inr: 0, count: 0 }, 'World of Crypto': { usdt: 0, inr: 0, count: 0 } };
+
+    payments.forEach(p => {
+        const date = p.payment_date || '';
+        const inr = parseFloat(p.inr_amount || 0);
+        const usdt = parseFloat(p.usdt || 0);
+        const mode = (p.payment_mode || 'P2P').trim();
+        const comp = (p.received_in || 'Digital Verse').trim();
+
+        const isMtd = (selMonth === 'overall') || date.startsWith(selMonth);
+        const isFtd = (date === selFtd);
+
+        if (isMtd) {
+            totalInr += inr;
+            totalUsdt += usdt;
+            totalTx++;
+
+            const modeKey = mode.toUpperCase().includes('D') ? 'D P2P' : 'P2P';
+            if (!modeMap[modeKey]) modeMap[modeKey] = { usdt: 0, inr: 0, count: 0 };
+            modeMap[modeKey].usdt += usdt;
+            modeMap[modeKey].inr += inr;
+            modeMap[modeKey].count++;
+
+            const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
+            if (!compMap[compKey]) compMap[compKey] = { usdt: 0, inr: 0, count: 0 };
+            compMap[compKey].usdt += usdt;
+            compMap[compKey].inr += inr;
+            compMap[compKey].count++;
+        }
+
+        const agName = p.agent_name || 'Unassigned';
+        if (!agentMap[agName]) agentMap[agName] = { name: agName, mtd: 0, ftd: 0 };
+        if (isMtd) agentMap[agName].mtd += inr;
+        if (isFtd) agentMap[agName].ftd += inr;
+
+        const tlName = p.tl || 'Unassigned';
+        if (!tlMap[tlName]) tlMap[tlName] = { name: tlName, mtd: 0, ftd: 0 };
+        if (isMtd) tlMap[tlName].mtd += inr;
+        if (isFtd) tlMap[tlName].ftd += inr;
+
+        const opsName = p.ops_manager || 'Unassigned';
+        if (!opsMap[opsName]) opsMap[opsName] = { name: opsName, mtd: 0, ftd: 0, teams: new Set() };
+        if (p.tl) opsMap[opsName].teams.add(p.tl);
+        if (isMtd) opsMap[opsName].mtd += inr;
+        if (isFtd) opsMap[opsName].ftd += inr;
+    });
+
+    // Update Minimal KPI Strip
+    document.getElementById('kpiInr').textContent = fmtInr(totalInr);
+    document.getElementById('kpiInrSub').textContent = `${totalTx} transactions`;
+    document.getElementById('kpiUsdt').textContent = fmtUsdt(totalUsdt) + ' USDT';
+    
+    document.getElementById('kpiModes').textContent = `${fmtUsdt(modeMap['D P2P'].usdt)} / ${fmtUsdt(modeMap['P2P'].usdt)}`;
+    document.getElementById('kpiModesSub').textContent = `Direct: ${fmtInrInt(modeMap['D P2P'].inr)} | P2P: ${fmtInrInt(modeMap['P2P'].inr)}`;
+
+    document.getElementById('kpiCompany').textContent = `${fmtInrInt(compMap['Digital Verse'].inr)} / ${fmtInrInt(compMap['World of Crypto'].inr)}`;
     document.getElementById('kpiCompanySub').textContent = `DV: ${fmtUsdt(compMap['Digital Verse'].usdt)} U | WK: ${fmtUsdt(compMap['World of Crypto'].usdt)} U`;
 
     function renderTargetStatus(sales, target) {
@@ -182,7 +256,7 @@ async function load() {
     </tr>`).join('');
     document.getElementById('companyTableBody').innerHTML = compRows;
 
-    window.currentReportData = { sortedAgents, sortedTLs, sortedOps, modeMap, compMap, selMonth, selFtd };
+    window.currentReportData = { modeMap, compMap, selMonth, selFtd };
 }
 
 applyBtn.onclick = load;
@@ -197,7 +271,7 @@ clearBtn.onclick = () => {
 if (exportExcelBtn) {
     exportExcelBtn.onclick = function() {
         if (!window.currentReportData) return alert('No report data to export.');
-        const { sortedAgents, sortedTLs, sortedOps, modeMap, compMap, selMonth } = window.currentReportData;
+        const { modeMap, compMap, selMonth } = window.currentReportData;
 
         const wb = XLSX.utils.book_new();
 
@@ -224,5 +298,4 @@ if (exportExcelBtn) {
 }
 
 load().catch(err => console.error(err));
-
 
