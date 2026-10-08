@@ -10,9 +10,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // UPDATE THESE WITH YOUR HOSTINGER MYSQL CREDENTIALS
 $db_host = 'localhost';
-$db_user = 'u303154098_YOUR_USER'; // e.g. u303154098_admin
-$db_pass = 'YOUR_DB_PASSWORD';
-$db_name = 'u303154098_o3Qhw'; 
+$db_user = 'u303154098_o3Qhw'; // e.g. u303154098_admin
+$db_pass = 'u303154098_ZtY2h';
+$db_name = 'u303154098_ZtY2h'; 
 
 try {
     $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass);
@@ -25,7 +25,7 @@ try {
 $action = $_GET['action'] ?? '';
 
 if ($action === 'sync_push') {
-    $data = json_decode(file_get_contents('php://input'), true);
+    $data = json_decode(file_get_contents('php://input'), true);    
     if (!$data) {
         echo json_encode(['success' => false, 'message' => 'No data provided']);
         exit;

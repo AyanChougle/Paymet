@@ -1,4 +1,4 @@
-const USE_LOCAL_DB = true;
+const USE_LOCAL_DB = false;
 
 // Initialize default users & auto-purge legacy demo accounts
 let storedUsers = JSON.parse(localStorage.getItem('pp_users') || '[]');
