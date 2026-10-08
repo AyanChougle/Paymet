@@ -215,20 +215,79 @@ if (importReportsFile) {
         reader.onload = async function(evt) {
             try {
                 const data = new Uint8Array(evt.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                
-                // Find Payment Sheet or default to first sheet
-                let targetSheetName = workbook.SheetNames[0];
-                for (const name of workbook.SheetNames) {
-                    const low = name.toLowerCase();
-                    if (low.includes('payment') || low.includes('sheet') || low.includes('oct') || low.includes('txn')) {
-                        targetSheetName = name;
-                        break;
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+
+                let extractedRows = [];
+
+                // Sort sheet names: prioritize sheets with payment, txn, oct, data, raw in name
+                const sheetNames = workbook.SheetNames.slice().sort((a, b) => {
+                    const score = (name) => {
+                        const n = name.toLowerCase();
+                        if (n.includes('payment') || n.includes('raw') || n.includes('txn') || n.includes('data')) return 3;
+                        if (n.includes('oct') || n.includes('sep') || n.includes('sheet') || n.includes('sales')) return 2;
+                        return 1;
+                    };
+                    return score(b) - score(a);
+                });
+
+                for (const sName of sheetNames) {
+                    const sheet = workbook.Sheets[sName];
+                    if (!sheet || !sheet['!ref']) continue;
+
+                    const rows2d = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                    if (!rows2d || rows2d.length === 0) continue;
+
+                    // Scan first 15 rows to find the actual header row
+                    let headerRowIdx = 0;
+                    let bestHeaderScore = 0;
+
+                    for (let r = 0; r < Math.min(rows2d.length, 15); r++) {
+                        const rowCells = rows2d[r].map(c => String(c).toLowerCase().trim());
+                        let score = 0;
+                        rowCells.forEach(cell => {
+                            if (cell.includes('date')) score += 2;
+                            if (cell.includes('agent') || cell.includes('executive') || cell.includes('caller')) score += 2;
+                            if (cell.includes('usdt')) score += 3;
+                            if (cell.includes('inr') || cell.includes('amount')) score += 2;
+                            if (cell.includes('client') || cell.includes('customer') || cell.includes('party')) score += 2;
+                            if (cell.includes('ecode') || cell.includes('e-code') || cell.includes('code')) score += 2;
+                            if (cell.includes('tl') || cell.includes('leader')) score += 2;
+                            if (cell.includes('ops') || cell.includes('manager')) score += 2;
+                            if (cell.includes('mode')) score += 1;
+                        });
+
+                        if (score > bestHeaderScore && score >= 2) {
+                            bestHeaderScore = score;
+                            headerRowIdx = r;
+                        }
+                    }
+
+                    const jsonRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIdx, defval: '' });
+                    if (jsonRows && jsonRows.length > 0) {
+                        // Check if these rows look like payment transactions
+                        let validInSheet = 0;
+                        jsonRows.forEach(row => {
+                            let hasSignal = false;
+                            for (const k in row) {
+                                const lk = k.toLowerCase();
+                                const lv = String(row[k]).trim();
+                                if ((lk.includes('agent') || lk.includes('client') || lk.includes('usdt') || lk.includes('inr') || lk.includes('amount')) && lv) {
+                                    hasSignal = true;
+                                }
+                            }
+                            if (hasSignal) validInSheet++;
+                        });
+
+                        if (validInSheet > 0) {
+                            extractedRows = jsonRows;
+                            break; // Successfully found the primary payment sheet!
+                        }
                     }
                 }
 
-                const sheet = workbook.Sheets[targetSheetName];
-                const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                if (extractedRows.length === 0) {
+                    throw new Error('No readable payment transaction rows found in the selected Excel file.');
+                }
 
                 let payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
                 let agents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
@@ -237,7 +296,7 @@ if (importReportsFile) {
                 let count = 0;
                 const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
 
-                rows.forEach((row, i) => {
+                extractedRows.forEach((row, i) => {
                     const dbData = {
                         payment_date: '',
                         ecode: '',
@@ -261,31 +320,33 @@ if (importReportsFile) {
 
                     for (const key of Object.keys(row)) {
                         const k = key.trim().toLowerCase();
-                        const val = String(row[key]).trim();
+                        const val = String(row[key] || '').trim();
 
-                        if (k === 'date' || k.includes('payment date')) dbData.payment_date = row[key];
-                        else if (k === 'e-code' || k === 'ecode' || k.includes('emp code') || k === 'code') dbData.ecode = val;
-                        else if (k.includes('agent name') || k === 'agent' || k === 'name') dbData.agent_name = val;
-                        else if (k.includes('tl') || k.includes('team leader')) dbData.tl = val;
-                        else if (k.includes('ops') || k.includes('manager')) dbData.ops_manager = val;
-                        else if (k.includes('client name') || k === 'client') dbData.client_name = val;
-                        else if (k.includes('client number') || k.includes('phone') || k.includes('mobile')) dbData.client_number = val;
+                        if (k === 'date' || k.includes('payment date') || k.includes('txn date') || k.includes('tx date') || k.includes('value date') || k.includes('entry date')) dbData.payment_date = row[key];
+                        else if (k.includes('emp code') || k.includes('e-code') || k === 'ecode' || k === 'code' || k.includes('emp id') || k === 'id') dbData.ecode = val;
+                        else if (k.includes('agent name') || k === 'agent' || k.includes('executive') || k.includes('caller') || k.includes('emp name') || k === 'name') dbData.agent_name = val;
+                        else if (k.includes('tl') || k.includes('team leader') || k.includes('lead') || k.includes('leader')) dbData.tl = val;
+                        else if (k.includes('ops manager') || k.includes('ops') || k.includes('manager')) dbData.ops_manager = val;
+                        else if (k.includes('client name') || k === 'client' || k.includes('customer') || k.includes('party')) dbData.client_name = val;
+                        else if (k.includes('client number') || k.includes('client number') || k.includes('phone') || k.includes('mobile') || k.includes('contact') || k === 'number') dbData.client_number = val;
                         else if (k.includes('email') || k.includes('mail')) dbData.email_id = val;
                         else if (k.includes('mode') || k.includes('type')) dbData.payment_mode = val;
-                        else if (k === 'usdt' || k.includes('usdt')) dbData.usdt = row[key];
-                        else if (k.includes('divided') || k.includes('rate')) dbData.divided_by = row[key];
-                        else if (k.includes('inr amount') || k === 'inr' || k.includes('amount')) dbData.inr_amount = row[key];
-                        else if (k.includes('ratio')) dbData.ratio = val;
+                        else if (k.includes('usdt')) dbData.usdt = row[key];
+                        else if (k.includes('divided') || k.includes('rate') || k.includes('div')) dbData.divided_by = row[key];
+                        else if (k.includes('inr amount') || k === 'inr' || k.includes('total inr') || k.includes('inr amt') || k === 'amount' || k.includes('amount') || k.includes('sales')) dbData.inr_amount = row[key];
+                        else if (k.includes('ratio') || k.includes('split')) dbData.ratio = val;
                         else if (k.includes('pan')) dbData.pan_no = val;
-                        else if (k.includes('aadhar')) dbData.aadhar_no = val;
-                        else if (k.includes('state')) dbData.state = val;
-                        else if (k.includes('received company') || k.includes('received in') || k === 'company') dbData.received_in = val;
-                        else if (k.includes('remark') || k.includes('ref')) dbData.remarks = val;
+                        else if (k.includes('aadhar') || k.includes('aadhaar')) dbData.aadhar_no = val;
+                        else if (k.includes('state') || k.includes('city') || k.includes('location')) dbData.state = val;
+                        else if (k.includes('received company') || k.includes('received in') || k.includes('company') || k.includes('entity')) dbData.received_in = val;
+                        else if (k.includes('remark') || k.includes('ref') || k.includes('comment') || k.includes('note')) dbData.remarks = val;
                     }
 
                     // Date Normalization
                     if (dbData.payment_date) {
-                        if (typeof dbData.payment_date === 'number') {
+                        if (dbData.payment_date instanceof Date) {
+                            dbData.payment_date = dbData.payment_date.toISOString().split('T')[0];
+                        } else if (typeof dbData.payment_date === 'number') {
                             const d = new Date(Math.round((dbData.payment_date - 25569) * 86400 * 1000));
                             dbData.payment_date = d.toISOString().split('T')[0];
                         } else {
@@ -298,6 +359,11 @@ if (importReportsFile) {
                                     if (monthNames[mKey]) {
                                         let yr = parts[2].length === 2 ? '20' + parts[2] : parts[2];
                                         dbData.payment_date = `${yr}-${monthNames[mKey]}-${parts[0].padStart(2, '0')}`;
+                                    } else if (!isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+                                        let yr = parts[0].length === 4 ? parts[0] : (parts[2].length === 2 ? '20' + parts[2] : parts[2]);
+                                        let mo = parts[0].length === 4 ? parts[1] : parts[1];
+                                        let da = parts[0].length === 4 ? parts[2] : parts[0];
+                                        dbData.payment_date = `${yr}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
                                     }
                                 }
                             } else if (strDate.includes('/')) {
@@ -314,15 +380,18 @@ if (importReportsFile) {
                         dbData.payment_date = new Date().toISOString().split('T')[0];
                     }
 
-                    if (dbData.agent_name || dbData.client_name || dbData.usdt || dbData.inr_amount) {
-                        const cleanNum = (v) => v ? parseFloat(String(v).replace(/[^0-9.-]+/g, '')) || 0 : 0;
-                        dbData.usdt = cleanNum(dbData.usdt);
-                        dbData.divided_by = cleanNum(dbData.divided_by) || 88;
-                        dbData.inr_amount = cleanNum(dbData.inr_amount) || Math.round((dbData.usdt * dbData.divided_by) * 100) / 100;
+                    const cleanNum = (v) => v ? parseFloat(String(v).replace(/[^0-9.-]+/g, '')) || 0 : 0;
+                    dbData.usdt = cleanNum(dbData.usdt);
+                    dbData.divided_by = cleanNum(dbData.divided_by) || 88;
+                    dbData.inr_amount = cleanNum(dbData.inr_amount) || Math.round((dbData.usdt * dbData.divided_by) * 100) / 100;
+
+                    // Only count as valid payment if it has an agent or client or money amount
+                    if (dbData.agent_name || dbData.client_name || dbData.usdt > 0 || dbData.inr_amount > 0) {
+                        if (!dbData.agent_name) dbData.agent_name = 'Unassigned Agent';
                         dbData.payment_mode = (dbData.payment_mode || 'P2P').toUpperCase().includes('D') ? 'D P2P' : 'P2P';
                         dbData.received_in = (dbData.received_in || '').toLowerCase().includes('world') || (dbData.received_in || '').toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
 
-                        dbData.id = nextId + i;
+                        dbData.id = nextId + count;
                         dbData.created_by_name = 'Payment Sheet Import';
                         dbData.created_at = dbData.payment_date + ' 12:00:00';
 
@@ -330,7 +399,7 @@ if (importReportsFile) {
                         count++;
 
                         // Sync Agent
-                        if (dbData.agent_name) {
+                        if (dbData.agent_name && dbData.agent_name !== 'Unassigned Agent') {
                             const exA = agents.find(a => (a.agent_name || '').toLowerCase() === dbData.agent_name.toLowerCase());
                             if (!exA) {
                                 agents.push({
@@ -339,16 +408,22 @@ if (importReportsFile) {
                                     ops_manager: dbData.ops_manager || '',
                                     tl: dbData.tl || ''
                                 });
+                            } else {
+                                if (!exA.ecode && dbData.ecode) exA.ecode = dbData.ecode;
+                                if (!exA.ops_manager && dbData.ops_manager) exA.ops_manager = dbData.ops_manager;
+                                if (!exA.tl && dbData.tl) exA.tl = dbData.tl;
                             }
                         }
 
                         // Sync Client
-                        if (dbData.client_name) {
-                            const exC = clients.find(c => (c.client_name || '').toLowerCase() === dbData.client_name.toLowerCase());
+                        if (dbData.client_name || dbData.client_number) {
+                            const cNum = dbData.client_number || '';
+                            const cName = dbData.client_name || '';
+                            const exC = clients.find(c => (cNum && c.client_number === cNum) || (cName && (c.client_name || '').toLowerCase() === cName.toLowerCase()));
                             if (!exC) {
                                 clients.push({
-                                    client_name: dbData.client_name,
-                                    client_number: dbData.client_number || '',
+                                    client_name: cName || 'Unknown Client',
+                                    client_number: cNum || '-',
                                     email_id: dbData.email_id || '',
                                     pan_no: dbData.pan_no || '',
                                     aadhar_no: dbData.aadhar_no || '',
@@ -368,6 +443,7 @@ if (importReportsFile) {
                 importReportsFile.value = '';
             } catch (err) {
                 alert('Import Error: ' + err.message);
+                if (importReportsFile) importReportsFile.value = '';
             }
         };
         reader.readAsArrayBuffer(file);

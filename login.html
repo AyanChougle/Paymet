@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login | Payment Portal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/app.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: var(--bg);
+        }
+        .login-box {
+            background: var(--surface);
+            padding: 40px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-box h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .login-box p {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+        .login-box form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .login-box label {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .login-box input {
+            padding: 10px 12px;
+            border: 1px solid var(--line2);
+            border-radius: 6px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: inherit;
+        }
+        .login-box button {
+            margin-top: 8px;
+            padding: 12px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .login-box button:hover {
+            opacity: 0.9;
+        }
+        #loginMsg {
+            color: var(--danger);
+            font-size: 13px;
+            text-align: center;
+            margin-top: 12px;
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body class="light">
+    <div class="login-box">
+        <h1>Payment Portal</h1>
+        <p>Sign in to your account</p>
+        <form id="loginForm">
+            <label>
+                Email Address
+                <input type="email" id="email" placeholder="admin@portal.com" required>
+            </label>
+            <label>
+                Password
+                <input type="password" id="password" placeholder="Enter your password" required>
+            </label>
+            <button type="submit">Sign In</button>
+            <div id="loginMsg"></div>
+        </form>
+    </div>
+
+    <script src="assets/js/theme.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/login.js"></script>
+</body>
+</html>

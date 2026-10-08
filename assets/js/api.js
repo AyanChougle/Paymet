@@ -1,13 +1,25 @@
 const USE_LOCAL_DB = true;
 
-// Initialize default users if not present
-if (!localStorage.getItem('pp_users')) {
-    localStorage.setItem('pp_users', JSON.stringify([
-        { id: 1, name: 'System Admin', email: 'admin@portal.com', role: 'ADMIN', password: 'admin', active: 1, created_at: '2026-10-01' },
-        { id: 2, name: 'Arshad (Ops)', email: 'ops@portal.com', role: 'OPS_MANAGER', password: 'ops', active: 1, created_at: '2026-10-01' },
-        { id: 3, name: 'Ayan (Entry)', email: 'entry@portal.com', role: 'ENTRY_USER', password: 'entry', active: 1, created_at: '2026-10-01' }
-    ]));
+// Initialize default users & auto-purge legacy demo accounts
+let storedUsers = JSON.parse(localStorage.getItem('pp_users') || '[]');
+
+// Purge old mock accounts from any existing session
+storedUsers = storedUsers.filter(u => u.email !== 'ops@portal.com' && u.email !== 'entry@portal.com' && u.email !== 'admin@local');
+
+if (storedUsers.length === 0) {
+    storedUsers = [
+        { id: 1, name: 'System Admin', email: 'admin@portal.com', role: 'ADMIN', password: '12121234', active: 1, created_at: '2026-10-01' }
+    ];
+} else {
+    // Ensure primary admin credentials are always up to date
+    const adminIndex = storedUsers.findIndex(u => u.email === 'admin@portal.com');
+    if (adminIndex >= 0) {
+        storedUsers[adminIndex].password = '12121234';
+    } else {
+        storedUsers.unshift({ id: 1, name: 'System Admin', email: 'admin@portal.com', role: 'ADMIN', password: '12121234', active: 1, created_at: '2026-10-01' });
+    }
 }
+localStorage.setItem('pp_users', JSON.stringify(storedUsers));
 
 if (!localStorage.getItem('pp_payments')) {
     localStorage.setItem('pp_payments', JSON.stringify([]));
@@ -15,12 +27,7 @@ if (!localStorage.getItem('pp_payments')) {
 
 function getCurrentUser() {
     let u = sessionStorage.getItem('pp_user');
-    if (!u) {
-        const users = JSON.parse(localStorage.getItem('pp_users') || '[]');
-        u = JSON.stringify(users[0] || { id: 1, name: 'System Admin', email: 'admin@portal.com', role: 'ADMIN' });
-        sessionStorage.setItem('pp_user', u);
-    }
-    return JSON.parse(u);
+    return u ? JSON.parse(u) : null;
 }
 
 function setCurrentUser(user) {
@@ -55,6 +62,15 @@ async function api(action, data = {}) {
             return { success: true, user: target };
         }
         throw new Error('User not found');
+    }
+
+    if (action === 'login') {
+        const target = users.find(u => (u.email || '').toLowerCase() === (data.email || '').toLowerCase() && u.password === data.password);
+        if (target) {
+            if (target.active === 0 || target.active === false) throw new Error('Account disabled');
+            return { success: true, user: target };
+        }
+        throw new Error('Invalid email or password');
     }
 
     if (action === 'create_payment') {
@@ -140,6 +156,16 @@ async function api(action, data = {}) {
         users.push(newUser);
         localStorage.setItem('pp_users', JSON.stringify(users));
         return { success: true, id: newUser.id };
+    }
+
+    if (action === 'delete_user') {
+        const targetId = parseInt(data.userId);
+        if (targetId === currentUser.id) {
+            throw new Error('You cannot delete your own logged-in account.');
+        }
+        users = users.filter(u => u.id !== targetId);
+        localStorage.setItem('pp_users', JSON.stringify(users));
+        return { success: true };
     }
 
     throw new Error('Unknown action ' + action);

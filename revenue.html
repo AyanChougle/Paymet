@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Dashboard | Payment Portal</title>
+    <title>Revenue | Payment Portal</title>
     <link rel="stylesheet" href="assets/css/app.css">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
@@ -11,8 +11,8 @@
     <aside class="sidebar">
         <div class="brand">PAYMENT<span>PORTAL</span></div>
         <nav>
-            <a class="active" href="dashboard.html">Dashboard</a>
-            <a href="revenue.html">Revenue Overview</a>
+            <a href="dashboard.html">Dashboard</a>
+            <a class="active" href="revenue.html">Revenue Overview</a>
             <a href="entry.html">Payment Entry</a>
             <a href="reports.html">Payment Reports</a>
             <a href="agents.html">Agents</a>
@@ -30,8 +30,8 @@
     <main class="main">
         <header>
             <div>
-                <p class="eyebrow">Executive Analytics</p>
-                <h1>Sales & Target Dashboard</h1>
+                <p class="eyebrow">Financial Analytics</p>
+                <h1>Overall Sales & Revenue Generated</h1>
             </div>
             <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
                 <div id="monthPaceBadge"></div>
@@ -80,98 +80,8 @@
             </div>
         </section>
 
-        <!-- View Switcher Tabs -->
-        <div class="section-tabs" id="dashTabs">
-            <button class="tab-btn active" onclick="switchDashTab('all', this)">All Reports</button>
-            <button class="tab-btn" onclick="switchDashTab('agents', this)">Agents Report</button>
-            <button class="tab-btn" onclick="switchDashTab('tls', this)">Team Leaders</button>
-            <button class="tab-btn" onclick="switchDashTab('ops', this)">Ops Managers</button>
-            <button class="tab-btn" onclick="switchDashTab('bifurcation', this)">Bifurcations</button>
-        </div>
-
-        <!-- Agents Leaderboard (Sheet 1) -->
-        <section class="panel tab-section" id="sec-agents">
-            <div class="panel-head">
-                <div>
-                    <h2>Agents Performance Report</h2>
-                    <p class="panel-sub">Month-to-Date (MTD) vs For-The-Day (FTD) Sales Leaderboard</p>
-                </div>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width: 50px;">Rank</th>
-                            <th>Emp Code</th>
-                            <th>Agent Name</th>
-                            <th>MTD / Filter Sales (INR)</th>
-                            <th>FTD Sales (INR)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="agentTableBody"></tbody>
-                    <tfoot id="agentTableFoot"></tfoot>
-                </table>
-            </div>
-        </section>
-
-        <!-- Team Leaders and Ops Managers side by side (Sheet 1) -->
-        <section class="two" id="sec-management">
-            <!-- Team Leaders Report -->
-            <section class="panel tab-section" id="sec-tls">
-                <div class="panel-head">
-                    <div>
-                        <h2>Team Leaders Report</h2>
-                        <p class="panel-sub">TL Grouped Sales & Targets</p>
-                    </div>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width: 50px;">Rank</th>
-                                <th>TL Name</th>
-                                <th>MTD / Filter Sales</th>
-                                <th>FTD Sales</th>
-                                <th>Target</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tlTableBody"></tbody>
-                        <tfoot id="tlTableFoot"></tfoot>
-                    </table>
-                </div>
-            </section>
-
-            <!-- Ops Managers Report -->
-            <section class="panel tab-section" id="sec-ops">
-                <div class="panel-head">
-                    <div>
-                        <h2>Ops Managers Report</h2>
-                        <p class="panel-sub">Operations MTD & FTD Performance (Teams & Targets)</p>
-                    </div>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width: 50px;">Rank</th>
-                                <th>Ops Manager</th>
-                                <th>TL Teams</th>
-                                <th>MTD / Filter Sales</th>
-                                <th>FTD Sales</th>
-                                <th>Target</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="opsTableBody"></tbody>
-                        <tfoot id="opsTableFoot"></tfoot>
-                    </table>
-                </div>
-            </section>
-        </section>
-
-        <!-- Payment Bifurcations (Sheet 4 in Excel) -->
-        <section class="two tab-section" id="sec-bifurcation">
+        <!-- Payment Bifurcations -->
+        <section class="two" id="sec-bifurcation">
             <section class="panel">
                 <div class="panel-head">
                     <div>
@@ -221,6 +131,6 @@
     <script src="assets/js/theme.js"></script>
     <script src="assets/js/api.js"></script>
     <script src="assets/js/auth.js"></script>
-    <script src="assets/js/dashboard.js"></script>
+    <script src="assets/js/revenue.js"></script>
 </body>
 </html>
