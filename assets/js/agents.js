@@ -159,7 +159,11 @@ async function loadData() {
     cachedTargets = getTargets();
     cachedOpsManagers = getOpsManagers();
     cachedTeamLeaders = getTeamLeaders();
-    const currentMonth = new Date().toISOString().slice(0, 7);
+    let currentMonth = new Date().toISOString().slice(0, 7);
+    if (cachedPayments.length > 0) {
+        const months = cachedPayments.map(p => (p.payment_date || '').slice(0, 7)).filter(Boolean).sort();
+        if (months.length > 0) currentMonth = months[months.length - 1];
+    }
 
     // Synchronize known agents from payments
     let mappings = getMappings();
@@ -209,8 +213,11 @@ async function loadData() {
     mappings.forEach(m => {
         if (m.tl) {
             const tlObj = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === m.tl.trim().toLowerCase());
-            if (tlObj && tlObj.ops_manager) {
-                m.ops_manager = tlObj.ops_manager.trim();
+            if (tlObj) {
+                const tlOps = tlObj.ops_manager || tlObj.reporting_to || '';
+                if (tlOps) {
+                    m.ops_manager = tlOps.trim();
+                }
             }
         }
     });
@@ -334,7 +341,7 @@ function renderOpsHierarchy(mappings) {
 
     // Ensure all configured TLs assigned to this Ops are visible
     cachedTeamLeaders.forEach(t => {
-        const opName = (t.ops_manager || '').trim();
+        const opName = (t.ops_manager || t.reporting_to || '').trim();
         const tlName = (t.name || '').trim();
         if (opName && opsGroups[opName]) {
             if (!opsGroups[opName].tls[tlName]) {
@@ -446,7 +453,7 @@ function renderTlHierarchy(mappings) {
             tlGroups[name] = {
                 ecode: t.ecode || '-',
                 name: name,
-                opsManager: t.ops_manager || 'Unassigned Ops',
+                opsManager: t.ops_manager || t.reporting_to || 'Unassigned Ops',
                 target: getRoleTarget('TL', name) || parseFloat(t.target || 0),
                 totalSales: 0,
                 totalTx: 0,

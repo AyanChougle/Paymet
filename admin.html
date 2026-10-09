@@ -53,10 +53,10 @@
                     <p class="panel-sub">Upload your raw master Excel sheet (.xlsx) — automatically extracts & populates Payments, Agents Directory, and Clients KYC across all pages</p>
                 </div>
             </div>
-            <div class="form-grid" style="align-items:center; grid-template-columns: 1fr auto auto;">
-                <input type="file" id="importFile" accept=".xlsx, .xls">
-                <button id="importBtn" class="primary">Import Master Spreadsheet</button>
-                <button id="clearAllBtn" class="danger">Wipe All Records</button>
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+                <input type="file" id="importFile" accept=".xlsx, .xls" style="flex: 1; min-width: 200px; padding: 8px; background: var(--bg-lighter); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                <button id="importBtn" class="primary" style="white-space: nowrap;">Import Master Spreadsheet</button>
+                <button id="clearAllBtn" class="danger" style="white-space: nowrap;">Wipe All Records</button>
             </div>
         </section>
 

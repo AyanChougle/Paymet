@@ -113,6 +113,24 @@ async function load() {
         lastEntryBadge.innerHTML = `Last Entry: <strong>${entryTime}</strong> by <span style="color:var(--accent); font-weight:700;">${entryBy}</span> (${fmtInr(lastEntry.inr_amount)})`;
     }
 
+    // Helper to resolve Ops Manager names cleanly
+    function resolveOpsName(name) {
+        if (!name) return '';
+        const clean = name.trim().toLowerCase();
+        for (const op of dbOps) {
+            const opClean = (op.name || '').trim().toLowerCase();
+            if (opClean === clean) return op.name.trim();
+            const firstA = clean.split(' ')[0];
+            const lastA = clean.split(' ').pop();
+            const firstB = opClean.split(' ')[0];
+            const lastB = opClean.split(' ').pop();
+            if (firstA === firstB && lastA === lastB && firstA.length >= 3) {
+                return op.name.trim();
+            }
+        }
+        return name.trim();
+    }
+
     // Populate months in dropdown if needed
     if (monthFilter.options.length <= 1) {
         const monthSet = new Set();
@@ -198,7 +216,7 @@ async function load() {
     const opsDbNames = new Set();
     const tlDbNames = new Set();
 
-    // 1. Build Ops Managers map strictly from Database (pp_ops_managers)
+    // 1. Initialize Ops Managers Map strictly from DB (pp_ops_managers)
     dbOps.forEach(o => {
         const name = (o.name || '').trim();
         if (name) {
@@ -215,33 +233,34 @@ async function load() {
         }
     });
 
-    // 2. Build Team Leaders map strictly from Database (pp_team_leaders)
+    // 2. Initialize Team Leaders Map strictly from DB (pp_team_leaders)
     dbTls.forEach(t => {
         const name = (t.name || '').trim();
         if (name) {
             tlDbNames.add(name.toLowerCase());
+            const resolvedOps = resolveOpsName(t.ops_manager || t.reporting_to || '');
             tlMap[name] = {
                 name: name,
                 mtd: 0,
                 ftd: 0,
-                opsManager: (t.reporting_to || t.ops_manager || '').trim(),
+                opsManager: resolvedOps,
                 target: parseFloat(t.monthly_target || getRoleTarget('TL', name) || 0)
             };
-            const assignedOps = (t.reporting_to || t.ops_manager || '').trim();
-            if (assignedOps && opsMap[assignedOps]) {
-                opsMap[assignedOps].teams.add(name);
+            if (resolvedOps && opsMap[resolvedOps]) {
+                opsMap[resolvedOps].teams.add(name);
             }
         }
     });
 
-    // 3. Build Agent Directory lookup maps from Database (pp_agents)
+    // 3. Build Agent Directory lookup maps from DB (pp_agents)
     const agentToTl = {};
     const agentToOps = {};
     const tlToOps = {};
 
     dbTls.forEach(t => {
-        if (t.name && (t.reporting_to || t.ops_manager)) {
-            tlToOps[t.name.toLowerCase().trim()] = (t.reporting_to || t.ops_manager).trim();
+        if (t.name) {
+            const resolvedOps = resolveOpsName(t.ops_manager || t.reporting_to || '');
+            if (resolvedOps) tlToOps[t.name.toLowerCase().trim()] = resolvedOps;
         }
     });
 
@@ -249,7 +268,7 @@ async function load() {
         const agName = (a.agent_name || '').toLowerCase().trim();
         if (agName) {
             if (a.tl) agentToTl[agName] = a.tl.trim();
-            if (a.ops_manager) agentToOps[agName] = a.ops_manager.trim();
+            if (a.ops_manager) agentToOps[agName] = resolveOpsName(a.ops_manager);
 
             const realName = (a.agent_name || '').trim();
             if (!agentMap[realName]) {
@@ -271,15 +290,16 @@ async function load() {
 
         const agName = (p.agent_name || '').trim() || 'Unassigned';
 
-        // Resolve TL (strictly matching DB Team Leaders)
+        // Resolve TL
         let rawTl = (p.tl || '').trim();
         if (!rawTl && agName !== 'Unassigned') {
             rawTl = agentToTl[agName.toLowerCase()] || '';
         }
         let tlName = tlDbNames.has(rawTl.toLowerCase()) ? rawTl : (agentToTl[agName.toLowerCase()] || rawTl || 'Unassigned TL');
 
-        // Resolve Ops Manager (strictly matching DB Ops Managers)
+        // Resolve Ops Manager
         let rawOps = (p.ops_manager || '').trim();
+        rawOps = resolveOpsName(rawOps);
         if (!rawOps || !opsDbNames.has(rawOps.toLowerCase())) {
             if (tlName && tlToOps[tlName.toLowerCase()]) rawOps = tlToOps[tlName.toLowerCase()];
             if (!rawOps && agName !== 'Unassigned') rawOps = agentToOps[agName.toLowerCase()] || '';
@@ -311,26 +331,12 @@ async function load() {
         if (isFtd) agentMap[agName].ftd += inr;
 
         // TL Sales (Only true TLs from DB)
-        if (!tlMap[tlName] && (tlDbNames.has(tlName.toLowerCase()) || isMtd)) {
-            tlMap[tlName] = { name: tlName, mtd: 0, ftd: 0, opsManager: opsName, target: getRoleTarget('TL', tlName) };
-        }
         if (tlMap[tlName]) {
             if (isMtd) tlMap[tlName].mtd += inr;
             if (isFtd) tlMap[tlName].ftd += inr;
         }
 
         // Ops Manager Sales (Only true Ops Managers from DB)
-        if (!opsMap[opsName] && (opsDbNames.has(opsName.toLowerCase()) || isMtd)) {
-            opsMap[opsName] = { 
-                name: opsName, 
-                mtd: 0, 
-                ftd: 0, 
-                teams: new Set(),
-                target: getRoleTarget('OPS', opsName),
-                modeMap: { 'P2P': 0, 'D P2P': 0 },
-                compMap: { 'Digital Verse': 0, 'World of Crypto': 0 }
-            };
-        }
         if (opsMap[opsName]) {
             if (tlName !== 'Unassigned TL' && tlDbNames.has(tlName.toLowerCase())) opsMap[opsName].teams.add(tlName);
             if (isMtd) {
@@ -372,32 +378,77 @@ async function load() {
     }
 
     // 1. Render Agents Table
-    const sortedAgents = Object.values(agentMap).sort((a, b) => b.mtd - a.mtd);
-    let agentMtdTotal = 0, agentFtdTotal = 0;
-    const agentRows = sortedAgents.map((ag, i) => {
-        agentMtdTotal += ag.mtd;
-        agentFtdTotal += ag.ftd;
-        const ecode = getAgentEcode(ag.name);
-        const rankColor = i === 0 ? 'color:var(--accent); font-weight:800;' : (i < 3 ? 'font-weight:700;' : 'color:var(--text-muted);');
-        return `<tr>
-            <td style="${rankColor}">${i + 1}</td>
-            <td style="color:var(--text-muted); font-family:var(--font-mono);">${ecode}</td>
-            <td><strong>${ag.name}</strong></td>
-            <td style="font-weight:700; ${i===0 ? 'color:var(--accent);':''}">${fmtInr(ag.mtd)}</td>
-            <td>${fmtInr(ag.ftd)}</td>
+    window.allAgentsData = Object.values(agentMap).map(ag => {
+        return { ...ag, ecode: getAgentEcode(ag.name) };
+    }).sort((a, b) => b.mtd - a.mtd);
+    
+    window.agentCurrentPage = 1;
+    window.agentPageSize = 20;
+
+    window.renderAgents = function() {
+        const searchVal = (document.getElementById('agentSearchFilter')?.value || '').toLowerCase();
+        let filtered = window.allAgentsData;
+        if (searchVal) {
+            filtered = filtered.filter(a => a.name.toLowerCase().includes(searchVal) || a.ecode.toLowerCase().includes(searchVal));
+        }
+
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / window.agentPageSize) || 1;
+        if (window.agentCurrentPage > totalPages) window.agentCurrentPage = totalPages;
+        
+        const startIndex = (window.agentCurrentPage - 1) * window.agentPageSize;
+        const pageData = filtered.slice(startIndex, startIndex + window.agentPageSize);
+
+        let agentMtdTotal = 0, agentFtdTotal = 0;
+        filtered.forEach(ag => { agentMtdTotal += ag.mtd; agentFtdTotal += ag.ftd; });
+
+        const agentRows = pageData.map((ag, idx) => {
+            const i = startIndex + idx;
+            const rankColor = i === 0 ? 'color:var(--accent); font-weight:800;' : (i < 3 ? 'font-weight:700;' : 'color:var(--text-muted);');
+            return `<tr>
+                <td style="${rankColor} text-align: center;">${i + 1}</td>
+                <td style="color:var(--text-muted); font-family:var(--font-mono); text-align: left;">${ag.ecode}</td>
+                <td style="text-align: left;"><strong>${ag.name}</strong></td>
+                <td style="font-weight:700; ${i===0 ? 'color:var(--accent);':''} text-align: right;">${fmtInr(ag.mtd)}</td>
+                <td style="text-align: right;">${fmtInr(ag.ftd)}</td>
+            </tr>`;
+        }).join('');
+
+        const agentBody = document.getElementById('agentTableBody');
+        const agentFoot = document.getElementById('agentTableFoot');
+        if (agentBody) agentBody.innerHTML = agentRows || '<tr><td colspan="5" class="text-muted" style="text-align:center; padding:18px;">No agents found.</td></tr>';
+        if (agentFoot) agentFoot.innerHTML = `<tr>
+            <td style="text-align: left;"><strong>Grand Total</strong></td>
+            <td></td>
+            <td></td>
+            <td style="text-align: right; font-weight: 700;">${fmtInr(agentMtdTotal)}</td>
+            <td style="text-align: right; font-weight: 700;">${fmtInr(agentFtdTotal)}</td>
         </tr>`;
-    }).join('');
 
-    const agentBody = document.getElementById('agentTableBody');
-    const agentFoot = document.getElementById('agentTableFoot');
-    if (agentBody) agentBody.innerHTML = agentRows || '<tr><td colspan="5" class="text-muted" style="text-align:center; padding:18px;">No payments found for this period.</td></tr>';
-    if (agentFoot) agentFoot.innerHTML = `<tr>
-        <td colspan="3">Grand Total</td>
-        <td>${fmtInr(agentMtdTotal)}</td>
-        <td>${fmtInr(agentFtdTotal)}</td>
-    </tr>`;
+        const pagContainer = document.getElementById('agentPagination');
+        if (pagContainer) {
+            let pagHtml = '';
+            pagHtml += `<button class="pagination-btn" onclick="window.agentCurrentPage=1; window.renderAgents();" ${window.agentCurrentPage === 1 ? 'disabled' : ''}>First</button>`;
+            pagHtml += `<button class="pagination-btn" onclick="window.agentCurrentPage--; window.renderAgents();" ${window.agentCurrentPage === 1 ? 'disabled' : ''}>Prev</button>`;
+            pagHtml += `<span style="font-size:13px; color:var(--text-muted); margin:0 10px;">Page ${window.agentCurrentPage} of ${totalPages}</span>`;
+            pagHtml += `<button class="pagination-btn" onclick="window.agentCurrentPage++; window.renderAgents();" ${window.agentCurrentPage === totalPages ? 'disabled' : ''}>Next</button>`;
+            pagHtml += `<button class="pagination-btn" onclick="window.agentCurrentPage=${totalPages}; window.renderAgents();" ${window.agentCurrentPage === totalPages ? 'disabled' : ''}>Last</button>`;
+            pagContainer.innerHTML = pagHtml;
+        }
+    };
 
-    // 2. Render Team Leaders Table (ONLY True DB Team Leaders)
+    const searchInput = document.getElementById('agentSearchFilter');
+    if (searchInput && !searchInput.hasAttribute('data-bound')) {
+        searchInput.setAttribute('data-bound', 'true');
+        searchInput.addEventListener('input', () => {
+            window.agentCurrentPage = 1;
+            window.renderAgents();
+        });
+    }
+
+    window.renderAgents();
+
+    // 2. Render Team Leaders Table (Fetched dynamically from DB table pp_team_leaders)
     const sortedTLs = Object.values(tlMap).filter(t => t.name !== 'Unassigned TL').sort((a, b) => b.mtd - a.mtd);
     let tlMtdTotal = 0, tlFtdTotal = 0;
     const tlRows = sortedTLs.map((tl, i) => {
@@ -424,7 +475,7 @@ async function load() {
         <td colspan="2">-</td>
     </tr>`;
 
-    // 3. Render Ops Managers Table (ONLY True DB Ops Managers)
+    // 3. Render Ops Managers Table (Fetched dynamically from DB table pp_ops_managers)
     const sortedOps = Object.values(opsMap).filter(o => o.name !== 'Unassigned Ops').sort((a, b) => b.mtd - a.mtd);
     let opsMtdTotal = 0, opsFtdTotal = 0;
     const opsRows = sortedOps.map((op, i) => {
@@ -478,8 +529,7 @@ async function load() {
     </tr>`).join('');
     const compBody = document.getElementById('companyTableBody');
     if (compBody) compBody.innerHTML = compRows || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:18px;">No transaction records found.</td></tr>';
-
-    window.currentReportData = { sortedAgents, sortedTLs, sortedOps, modeMap, compMap, selMonth, selFtd };
+    window.currentReportData = { sortedAgents: window.allAgentsData, sortedTLs, sortedOps, modeMap, compMap, selMonth, selFtd };
 }
 
 applyBtn.onclick = load;

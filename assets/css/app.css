@@ -925,3 +925,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }
 }
 #db-warning-banner { display: none !important; visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
+
+/* Pagination Styles */
+.pagination-btn { background: var(--bg-lighter); color: var(--text-muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 13px; font-weight: 500; }
+.pagination-btn:hover { background: var(--border); color: var(--text); }
+.pagination-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+

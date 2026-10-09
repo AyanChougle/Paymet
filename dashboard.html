@@ -96,22 +96,26 @@
                     <h2>Agents Performance Report</h2>
                     <p class="panel-sub">Month-to-Date (MTD) vs For-The-Day (FTD) Sales Leaderboard</p>
                 </div>
+                <div style="display: flex; gap: 10px; width: 100%; max-width: 250px; margin-top: 10px;">
+                    <input type="text" id="agentSearchFilter" class="input-field" placeholder="Search agent or e-code..." style="width: 100%;">
+                </div>
             </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 50px;">Rank</th>
-                            <th>Emp Code</th>
-                            <th>Agent Name</th>
-                            <th>MTD / Filter Sales (INR)</th>
-                            <th>FTD Sales (INR)</th>
+                            <th style="width: 50px; text-align: center;">Rank</th>
+                            <th style="text-align: left;">Emp Code</th>
+                            <th style="text-align: left;">Agent Name</th>
+                            <th style="text-align: right;">MTD / Filter Sales (INR)</th>
+                            <th style="text-align: right;">FTD Sales (INR)</th>
                         </tr>
                     </thead>
                     <tbody id="agentTableBody"></tbody>
                     <tfoot id="agentTableFoot"></tfoot>
                 </table>
             </div>
+            <div id="agentPagination" style="padding: 15px; display: flex; justify-content: flex-end; gap: 5px; align-items: center; flex-wrap: wrap;"></div>
         </section>
 
         <!-- Team Leaders and Ops Managers side by side (Sheet 1) -->
