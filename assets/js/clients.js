@@ -16,9 +16,19 @@ function saveClients(clients) {
     localStorage.setItem('pp_clients', JSON.stringify(clients));
 }
 
+async function getClientsData() {
+    if (!USE_LOCAL_DB) {
+        try {
+            const res = await api('clients', {});
+            if (res.rows && res.rows.length) return res.rows;
+        } catch(e) {}
+    }
+    return JSON.parse(localStorage.getItem('pp_clients') || '[]');
+}
+
 async function render() {
     // 1. Render Registered Clients
-    const clients = getClients();
+    const clients = await getClientsData();
     list.innerHTML = clients.map((c, idx) => `<tr>
         <td><strong>${c.client_name || ''}</strong></td>
         <td>${c.client_number || '-'}</td>

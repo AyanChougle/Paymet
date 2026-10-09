@@ -1,18 +1,20 @@
 <!doctype html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Clients Directory & Paid Clients | Payment Portal</title>
-    <link rel="stylesheet" href="assets/css/app.css">
+    <link rel="stylesheet" href="assets/css/app.css?v=3">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
+
 <body>
     <aside class="sidebar">
         <div class="brand">PAYMENT<span>PORTAL</span></div>
         <nav>
             <a href="dashboard.html">Dashboard</a>
-            <a href="revenue.html">Revenue Overview</a>`n            <a href="entry.html">Payment Entry</a>
+            <a href="revenue.html">Revenue Overview</a>`n <a href="entry.html">Payment Entry</a>
             <a href="reports.html">Payment Reports</a>
             <a href="agents.html">Agents</a>
             <a class="active" href="clients.html">Clients</a>
@@ -34,7 +36,8 @@
             </div>
             <div style="display:flex; gap:8px;">
                 <input type="file" id="importClientsFile" accept=".xlsx, .xls" style="display:none;">
-                <button class="ghost" onclick="document.getElementById('importClientsFile').click()">Import Clients (.xlsx)</button>
+                <button class="ghost" onclick="document.getElementById('importClientsFile').click()">Import Clients
+                    (.xlsx)</button>
                 <button id="exportClientsBtn" class="btn-excel">Export Clients & KYC (.xlsx)</button>
             </div>
         </header>
@@ -75,7 +78,8 @@
                 <label>Client Name<input name="client_name" placeholder="e.g. Ankit Virani" required></label>
                 <label>Client Phone Number<input name="client_number" placeholder="10-digit mobile" required></label>
                 <label>Email ID<input name="email_id" type="email" placeholder="client@example.com"></label>
-                <label>PAN Card Number<input name="pan_no" placeholder="ABCDE1234F" style="text-transform:uppercase;" maxlength="10"></label>
+                <label>PAN Card Number<input name="pan_no" placeholder="ABCDE1234F" style="text-transform:uppercase;"
+                        maxlength="10"></label>
                 <label>Aadhar Card Number<input name="aadhar_no" placeholder="12-digit Aadhar" maxlength="16"></label>
                 <label>State / Region
                     <select name="state">
@@ -148,8 +152,9 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js"></script>
+    <script src="assets/js/api.js?v=3"></script>
     <script src="assets/js/auth.js"></script>
     <script src="assets/js/clients.js"></script>
 </body>
+
 </html>

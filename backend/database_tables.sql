@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS `pp_users` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
+  
 -- Insert Default Admin
 INSERT IGNORE INTO `pp_users` (`name`, `email`, `password`, `role`) VALUES
 ('System Admin', 'admin@portal.com', '12121234', 'ADMIN');
@@ -99,3 +99,4 @@ CREATE TABLE IF NOT EXISTS `pp_accounts` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT IGNORE INTO pp_users (id, name, email, role, password, active, created_at) VALUES (1, 'System Admin', 'admin@portal.com', 'ADMIN', '12121234', 1, '2026-10-01');

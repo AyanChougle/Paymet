@@ -148,25 +148,13 @@ importBtn.onclick = function() {
 
             let extractedRows = [];
 
-            // Sort sheets by likelihood of containing payment records
-            const sheetNames = workbook.SheetNames.slice().sort((a, b) => {
-                const score = (name) => {
-                    const n = name.toLowerCase();
-                    if (n.includes('payment') || n.includes('raw') || n.includes('txn') || n.includes('data')) return 3;
-                    if (n.includes('oct') || n.includes('sep') || n.includes('sheet') || n.includes('sales')) return 2;
-                    return 1;
-                };
-                return score(b) - score(a);
-            });
-
-            for (const sName of sheetNames) {
+            for (const sName of workbook.SheetNames) {
                 const sheet = workbook.Sheets[sName];
                 if (!sheet || !sheet['!ref']) continue;
 
                 const rows2d = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
                 if (!rows2d || rows2d.length === 0) continue;
 
-                // Scan first 15 rows to find the actual header row
                 let headerRowIdx = 0;
                 let bestHeaderScore = 0;
 
@@ -190,24 +178,10 @@ importBtn.onclick = function() {
                     }
                 }
 
-                const jsonRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIdx, defval: '' });
-                if (jsonRows && jsonRows.length > 0) {
-                    let validInSheet = 0;
-                    jsonRows.forEach(row => {
-                        let hasSignal = false;
-                        for (const k in row) {
-                            const lk = k.toLowerCase();
-                            const lv = String(row[k]).trim();
-                            if ((lk.includes('agent') || lk.includes('client') || lk.includes('usdt') || lk.includes('inr') || lk.includes('amount')) && lv) {
-                                hasSignal = true;
-                            }
-                        }
-                        if (hasSignal) validInSheet++;
-                    });
-
-                    if (validInSheet > 0) {
-                        extractedRows = jsonRows;
-                        break;
+                if (bestHeaderScore >= 2) {
+                    const jsonRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIdx, defval: '' });
+                    if (jsonRows && jsonRows.length > 0) {
+                        extractedRows.push(...jsonRows);
                     }
                 }
             }
@@ -224,7 +198,8 @@ importBtn.onclick = function() {
 
             const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
 
-            extractedRows.forEach((row, idx) => {
+            importBtn.textContent = 'Pushing to Database...';
+            for (const row of extractedRows) {
                 let dbData = {};
 
                 for (const key in row) {
@@ -307,6 +282,14 @@ importBtn.onclick = function() {
                     payments.push(dbData);
                     newPaymentsCount++;
 
+                    try {
+                        if (!USE_LOCAL_DB) {
+                            await api('create_payment', dbData);
+                        }
+                    } catch(e) {
+                        console.error('Failed to sync row', e);
+                    }
+
                     // ==========================================
                     // BIFURCATION 1: AGENTS DIRECTORY AUTO-SYNC
                     // ==========================================
@@ -352,7 +335,7 @@ importBtn.onclick = function() {
                         }
                     }
                 }
-            });
+            }
 
             // Save all bifurcated collections
             localStorage.setItem('pp_payments', JSON.stringify(payments));

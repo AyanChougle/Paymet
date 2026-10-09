@@ -908,3 +908,4 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         min-width: 100%;
     }
 }
+#db-warning-banner { display: none !important; visibility: hidden !important; height: 0 !important; overflow: hidden !important; }

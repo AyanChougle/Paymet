@@ -123,13 +123,13 @@ window.onDesignationChange = function() {
         grpTarget.style.display = 'flex';
     } else if (des === 'TL') {
         grpOps.style.display = 'flex';
-        grpOps.querySelector('input').placeholder = 'e.g. Rushikesh Ravindra Budar';
+        grpOps.querySelector('input').placeholder = 'Enter Full Name';
         grpTl.style.display = 'none';
         grpTarget.style.display = 'flex';
     } else {
         grpOps.style.display = 'flex';
         grpTl.style.display = 'flex';
-        grpTl.querySelector('input').placeholder = 'e.g. Saif Shaikh';
+        grpTl.querySelector('input').placeholder = 'Enter Full Name';
         grpTl.querySelector('input').previousSibling.textContent = 'Team Leader Name (TL)';
         grpTarget.style.display = 'none';
     }
@@ -138,6 +138,24 @@ window.onDesignationChange = function() {
 async function loadData() {
     const res = await api('dashboard', {});
     cachedPayments = res.rawPayments || [];
+
+    if (!USE_LOCAL_DB) {
+        try {
+            const agRes = await api('agents', {});
+            if (agRes.agents && agRes.agents.length) {
+                localStorage.setItem('pp_agents', JSON.stringify(agRes.agents));
+            }
+            if (agRes.ops_managers && agRes.ops_managers.length) {
+                localStorage.setItem('pp_ops_managers', JSON.stringify(agRes.ops_managers));
+            }
+            if (agRes.team_leaders && agRes.team_leaders.length) {
+                localStorage.setItem('pp_team_leaders', JSON.stringify(agRes.team_leaders));
+            }
+        } catch(e) {
+            console.warn('Could not fetch cloud agents:', e);
+        }
+    }
+
     cachedTargets = getTargets();
     cachedOpsManagers = getOpsManagers();
     cachedTeamLeaders = getTeamLeaders();

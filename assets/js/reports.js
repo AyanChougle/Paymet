@@ -296,7 +296,7 @@ if (importReportsFile) {
                 let count = 0;
                 const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
 
-                extractedRows.forEach((row, i) => {
+                for (const row of extractedRows) {
                     const dbData = {
                         payment_date: '',
                         ecode: '',
@@ -398,6 +398,14 @@ if (importReportsFile) {
                         payments.push(dbData);
                         count++;
 
+                        if (!USE_LOCAL_DB) {
+                            try {
+                                await api('create_payment', dbData);
+                            } catch(e) {
+                                console.error('Cloud insert error:', e);
+                            }
+                        }
+
                         // Sync Agent
                         if (dbData.agent_name && dbData.agent_name !== 'Unassigned Agent') {
                             const exA = agents.find(a => (a.agent_name || '').toLowerCase() === dbData.agent_name.toLowerCase());
@@ -432,7 +440,7 @@ if (importReportsFile) {
                             }
                         }
                     }
-                });
+                }
 
                 localStorage.setItem('pp_payments', JSON.stringify(payments));
                 localStorage.setItem('pp_agents', JSON.stringify(agents));
