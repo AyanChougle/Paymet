@@ -13,54 +13,72 @@ const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minim
 const fmtInrInt = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const fmtUsdt = (num) => Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function getTargets() {
-    return JSON.parse(localStorage.getItem('pp_targets') || '[]');
+let cachedDbTargets = [];
+
+async function getTargets() {
+    try {
+        const [agRes] = await Promise.all([
+            api('agents', {}).catch(() => ({}))
+        ]);
+        const list = [];
+        (agRes.ops_managers || []).forEach(o => {
+            const t = parseFloat(o.monthly_target || 0);
+            if (t > 0 || o.name) list.push({ type: 'OPS', name: o.name, target: t });
+        });
+        (agRes.team_leaders || []).forEach(t => {
+            const tgt = parseFloat(t.monthly_target || 0);
+            if (tgt > 0 || t.name) list.push({ type: 'TL', name: t.name, target: tgt });
+        });
+        if (list.length) {
+            cachedDbTargets = list;
+            localStorage.setItem('pp_targets', JSON.stringify(list));
+            return list;
+        }
+    } catch(e) {}
+    cachedDbTargets = JSON.parse(localStorage.getItem('pp_targets') || '[]');
+    return cachedDbTargets;
 }
 
 function saveTargets(targets) {
     localStorage.setItem('pp_targets', JSON.stringify(targets));
 }
 
-function renderTargets() {
-    const targets = getTargets();
-    targetList.innerHTML = targets.map((t, idx) => `<tr>
+async function renderTargets() {
+    const targets = await getTargets();
+    targetList.innerHTML = targets.map(t => `<tr>
         <td><strong>${t.type === 'OPS' ? 'Ops Manager' : 'Team Leader (TL)'}</strong></td>
         <td><strong>${t.name}</strong></td>
-        <td style="font-weight:700; color:var(--accent);">${fmtInrInt(t.target)}</td>
-        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteTarget(${idx})">Delete</button></td>
+        <td style="font-weight:700; color:var(--accent);">${t.target > 0 ? fmtInrInt(t.target) : '-'}</td>
+        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteTarget('${t.type}', '${t.name.replace(/'/g, "\\'")}')">Reset</button></td>
     </tr>`).join('') || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:16px;">No OPS or TL targets configured yet.</td></tr>';
 }
 
-window.deleteTarget = function(idx) {
-    if (confirm('Delete this target?')) {
-        let targets = getTargets();
-        targets.splice(idx, 1);
-        saveTargets(targets);
-        renderTargets();
+window.deleteTarget = async function(type, name) {
+    if (confirm(`Reset target for ${name} to 0 in the database?`)) {
+        try {
+            await api('update_target_node', { type, name, target: 0 });
+            await renderTargets();
+        } catch(e) {
+            alert('Failed to reset target: ' + e.message);
+        }
     }
 };
 
-targetForm.onsubmit = e => {
+targetForm.onsubmit = async e => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(targetForm));
     data.name = data.name.trim();
     data.target = parseFloat(data.target || 0);
 
-    let targets = getTargets();
-    const existingIndex = targets.findIndex(t => t.type === data.type && t.name.toLowerCase() === data.name.toLowerCase());
-
-    if (existingIndex >= 0) {
-        targets[existingIndex].target = data.target;
-        targetMsg.textContent = 'Target updated!';
-    } else {
-        targets.push(data);
-        targetMsg.textContent = 'Target saved!';
+    try {
+        await api('update_target_node', data);
+        targetMsg.textContent = 'Target saved to database!';
+        targetForm.reset();
+        await renderTargets();
+        setTimeout(() => targetMsg.textContent = '', 3000);
+    } catch(err) {
+        alert('Error saving target: ' + err.message);
     }
-
-    saveTargets(targets);
-    targetForm.reset();
-    renderTargets();
-    setTimeout(() => targetMsg.textContent = '', 3000);
 };
 
 async function load() {
@@ -70,7 +88,10 @@ async function load() {
     document.getElementById('users').textContent = j.stats.users;
     document.getElementById('payments').textContent = j.stats.payments;
 
-    const dash = await api('dashboard', {});
+    const [dash, accRes] = await Promise.all([
+        api('dashboard', {}).catch(() => ({ rawPayments: [] })),
+        api('accounts', {}).catch(() => ({ rows: [] }))
+    ]);
     const raw = dash.rawPayments || [];
 
     let u = 0, i = 0;
@@ -79,7 +100,7 @@ async function load() {
         i += (parseFloat(p.inr_amount) || 0);
     });
 
-    const acc = JSON.parse(localStorage.getItem('pp_accounts') || '[]');
+    const acc = accRes.rows || [];
     let c = 0;
     acc.forEach(x => {
         c += (parseFloat(x.amount) || 0);
@@ -293,48 +314,33 @@ importBtn.onclick = function() {
                     }
 
                     // ==========================================
-                    // BIFURCATION 1: AGENTS DIRECTORY AUTO-SYNC
+                    // BIFURCATION 1: AGENTS DIRECTORY AUTO-SYNC TO DB
                     // ==========================================
                     if (dbData.agent_name && dbData.agent_name !== 'Unassigned Agent') {
-                        const existingAgent = agents.find(a => (a.agent_name || '').toLowerCase() === dbData.agent_name.toLowerCase());
-                        if (!existingAgent) {
-                            agents.push({
-                                ecode: dbData.ecode || `EMP-${100 + agents.length + 1}`,
-                                agent_name: dbData.agent_name,
+                        try {
+                            await api('upsert_agent_node', {
+                                name: dbData.agent_name,
+                                ecode: dbData.ecode || '',
                                 ops_manager: dbData.ops_manager || '',
                                 tl: dbData.tl || ''
                             });
-                            newAgentsCount++;
-                        } else {
-                            if (!existingAgent.ecode && dbData.ecode) existingAgent.ecode = dbData.ecode;
-                            if (!existingAgent.ops_manager && dbData.ops_manager) existingAgent.ops_manager = dbData.ops_manager;
-                            if (!existingAgent.tl && dbData.tl) existingAgent.tl = dbData.tl;
-                        }
+                        } catch(e) {}
                     }
 
                     // ==========================================
-                    // BIFURCATION 2: CLIENTS DIRECTORY AUTO-SYNC
+                    // BIFURCATION 2: CLIENTS DIRECTORY AUTO-SYNC TO DB
                     // ==========================================
                     if (dbData.client_name || dbData.client_number) {
-                        const cNum = dbData.client_number || '';
-                        const cName = dbData.client_name || '';
-                        const existingClient = clients.find(c => (cNum && c.client_number === cNum) || (cName && (c.client_name || '').toLowerCase() === cName.toLowerCase()));
-                        if (!existingClient) {
-                            clients.push({
-                                client_name: cName || 'Unknown Client',
-                                client_number: cNum || '-',
+                        try {
+                            await api('upsert_client_node', {
+                                client_name: dbData.client_name || 'Unknown Client',
+                                client_number: dbData.client_number || '',
                                 email_id: dbData.email_id || '',
                                 pan_no: dbData.pan_no || '',
                                 aadhar_no: dbData.aadhar_no || '',
                                 state: dbData.state || ''
                             });
-                            newClientsCount++;
-                        } else {
-                            if (!existingClient.email_id && dbData.email_id) existingClient.email_id = dbData.email_id;
-                            if (!existingClient.pan_no && dbData.pan_no) existingClient.pan_no = dbData.pan_no;
-                            if (!existingClient.aadhar_no && dbData.aadhar_no) existingClient.aadhar_no = dbData.aadhar_no;
-                            if (!existingClient.state && dbData.state) existingClient.state = dbData.state;
-                        }
+                        } catch(e) {}
                     }
                 }
             }
@@ -362,49 +368,73 @@ importBtn.onclick = function() {
 // MASTER EXPORTER (ALL MODULES IN 1 EXCEL)
 // ==========================================
 if (exportBackupBtn) {
-    exportBackupBtn.onclick = function() {
-        const wb = XLSX.utils.book_new();
+    exportBackupBtn.onclick = async function() {
+        exportBackupBtn.textContent = 'Generating Database Backup...';
+        exportBackupBtn.disabled = true;
 
-        const payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
-        const agents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
-        const clients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
-        const targets = JSON.parse(localStorage.getItem('pp_targets') || '[]');
-        const accounts = JSON.parse(localStorage.getItem('pp_accounts') || '[]');
+        try {
+            const [dash, agRes, clRes, accRes] = await Promise.all([
+                api('dashboard', {}).catch(() => ({ rawPayments: [] })),
+                api('agents', {}).catch(() => ({ agents: [], ops_managers: [], team_leaders: [] })),
+                api('clients', {}).catch(() => ({ rows: [] })),
+                api('accounts', {}).catch(() => ({ rows: [] }))
+            ]);
 
-        // Sheet 1: Payments
-        const wsPayments = XLSX.utils.json_to_sheet(payments);
-        XLSX.utils.book_append_sheet(wb, wsPayments, 'Payment Sheet');
+            const wb = XLSX.utils.book_new();
 
-        // Sheet 2: Agents
-        const wsAgents = XLSX.utils.json_to_sheet(agents);
-        XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Directory');
+            const payments = dash.rawPayments || [];
+            const agents = agRes.agents || [];
+            const opsManagers = agRes.ops_managers || [];
+            const teamLeaders = agRes.team_leaders || [];
+            const clients = clRes.rows || [];
+            const accounts = accRes.rows || [];
 
-        // Sheet 3: Clients
-        const wsClients = XLSX.utils.json_to_sheet(clients);
-        XLSX.utils.book_append_sheet(wb, wsClients, 'Clients Directory');
+            // Sheet 1: Payments
+            const wsPayments = XLSX.utils.json_to_sheet(payments);
+            XLSX.utils.book_append_sheet(wb, wsPayments, 'Payments (Live DB)');
 
-        // Sheet 4: Targets
-        const wsTargets = XLSX.utils.json_to_sheet(targets);
-        XLSX.utils.book_append_sheet(wb, wsTargets, 'OPS & TL Targets');
+            // Sheet 2: Agents
+            const wsAgents = XLSX.utils.json_to_sheet(agents);
+            XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Directory');
 
-        // Sheet 5: Accounts Ledger
-        const wsAccounts = XLSX.utils.json_to_sheet(accounts);
-        XLSX.utils.book_append_sheet(wb, wsAccounts, 'Accounts Handover');
+            // Sheet 3: Ops Managers
+            const wsOps = XLSX.utils.json_to_sheet(opsManagers);
+            XLSX.utils.book_append_sheet(wb, wsOps, 'Ops Managers');
 
-        XLSX.writeFile(wb, `Master_Portal_Backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            // Sheet 4: Team Leaders
+            const wsTls = XLSX.utils.json_to_sheet(teamLeaders);
+            XLSX.utils.book_append_sheet(wb, wsTls, 'Team Leaders');
+
+            // Sheet 5: Clients KYC
+            const wsClients = XLSX.utils.json_to_sheet(clients);
+            XLSX.utils.book_append_sheet(wb, wsClients, 'Clients KYC Directory');
+
+            // Sheet 6: Accounts Ledger
+            const wsAccounts = XLSX.utils.json_to_sheet(accounts);
+            XLSX.utils.book_append_sheet(wb, wsAccounts, 'Accounts Handover');
+
+            XLSX.writeFile(wb, `Hostinger_Master_DB_Backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        } catch(err) {
+            alert('Backup Error: ' + err.message);
+        } finally {
+            exportBackupBtn.textContent = 'Export Complete System Backup (.xlsx)';
+            exportBackupBtn.disabled = false;
+        }
     };
 }
 
 // Clear Data
-clearAllBtn.onclick = function() {
-    if (confirm('Are you sure you want to wipe all local records across payments, agents, and clients? This cannot be undone.')) {
-        localStorage.setItem('pp_payments', JSON.stringify([]));
-        localStorage.setItem('pp_agents', JSON.stringify([]));
-        localStorage.setItem('pp_clients', JSON.stringify([]));
-        localStorage.setItem('pp_targets', JSON.stringify([]));
-        localStorage.setItem('pp_accounts', JSON.stringify([]));
-        alert('All portal records reset to zero.');
-        load();
+clearAllBtn.onclick = async function() {
+    if (confirm('Are you sure you want to wipe all transactions in the live Hostinger MySQL database? (Directory members will be preserved). This cannot be undone.')) {
+        try {
+            await api('wipe_database_records', { scope: 'all' });
+            localStorage.setItem('pp_payments', JSON.stringify([]));
+            localStorage.setItem('pp_accounts', JSON.stringify([]));
+            alert('Live database transactions and accounts ledger wiped successfully.');
+            await load();
+        } catch(e) {
+            alert('Error resetting database: ' + e.message);
+        }
     }
 };
 

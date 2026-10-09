@@ -20,8 +20,16 @@ function getAgentEcode(name) {
 
 function getRoleTarget(type, name) {
     if (!name) return 0;
+    const clean = (name || '').trim().toLowerCase();
+    if (type === 'OPS' && window.dbOps) {
+        const found = window.dbOps.find(o => (o.name || '').trim().toLowerCase() === clean);
+        if (found && (found.monthly_target || found.target)) return parseFloat(found.monthly_target || found.target);
+    } else if (type === 'TL' && window.dbTls) {
+        const found = window.dbTls.find(t => (t.name || '').trim().toLowerCase() === clean);
+        if (found && (found.monthly_target || found.target)) return parseFloat(found.monthly_target || found.target);
+    }
     const targets = JSON.parse(localStorage.getItem('pp_targets') || '[]');
-    const found = targets.find(t => t.type === type && (t.name || '').toLowerCase() === name.toLowerCase());
+    const found = targets.find(t => t.type === type && (t.name || '').toLowerCase() === clean);
     return found && found.target ? parseFloat(found.target) : 0;
 }
 

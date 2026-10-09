@@ -53,22 +53,65 @@ function saveTargets(targets) {
 
 function getRoleTarget(type, name) {
     if (!name) return 0;
+    const clean = (name || '').trim().toLowerCase();
+    if (type === 'OPS') {
+        const found = cachedOpsManagers.find(o => (o.name || '').trim().toLowerCase() === clean);
+        if (found && (found.monthly_target || found.target)) {
+            return parseFloat(found.monthly_target || found.target);
+        }
+    } else if (type === 'TL') {
+        const found = cachedTeamLeaders.find(t => (t.name || '').trim().toLowerCase() === clean);
+        if (found && (found.monthly_target || found.target)) {
+            return parseFloat(found.monthly_target || found.target);
+        }
+    }
     const targets = getTargets();
-    const found = targets.find(t => t.type === type && (t.name || '').toLowerCase() === name.toLowerCase());
+    const found = targets.find(t => t.type === type && (t.name || '').trim().toLowerCase() === clean);
     return found && found.target ? parseFloat(found.target) : 0;
 }
 
-function setRoleTarget(type, name, targetVal) {
+function resolveOpsName(name) {
+    if (!name) return '';
+    const clean = name.trim().toLowerCase();
+    if (clean.includes('unassigned')) return 'Unassigned Ops Manager';
+    for (const op of cachedOpsManagers) {
+        const opClean = (op.name || '').trim().toLowerCase();
+        if (opClean === clean) return op.name.trim();
+        const firstA = clean.split(' ')[0];
+        const lastA = clean.split(' ').pop();
+        const firstB = opClean.split(' ')[0];
+        const lastB = opClean.split(' ').pop();
+        if (firstA === firstB && lastA === lastB && firstA.length >= 3) {
+            return op.name.trim();
+        }
+    }
+    return name.trim();
+}
+
+async function setRoleTarget(type, name, targetVal) {
     if (!name) return;
-    let targets = getTargets();
     const val = parseFloat(targetVal || 0);
-    const idx = targets.findIndex(t => t.type === type && (t.name || '').toLowerCase() === name.toLowerCase());
+    const clean = (name || '').trim().toLowerCase();
+    if (type === 'OPS') {
+        const found = cachedOpsManagers.find(o => (o.name || '').trim().toLowerCase() === clean);
+        if (found) found.monthly_target = val;
+    } else if (type === 'TL') {
+        const found = cachedTeamLeaders.find(t => (t.name || '').trim().toLowerCase() === clean);
+        if (found) found.monthly_target = val;
+    }
+    let targets = getTargets();
+    const idx = targets.findIndex(t => t.type === type && (t.name || '').trim().toLowerCase() === clean);
     if (idx >= 0) {
         targets[idx].target = val;
     } else if (val > 0) {
         targets.push({ type: type, name: name, target: val });
     }
     saveTargets(targets);
+    try {
+        await api('update_target_node', { type, name, target: val });
+    } catch(e) {
+        console.warn('Target save to database warning:', e);
+    }
 }
 
 function renderTargetStatus(sales, target) {
@@ -136,70 +179,103 @@ window.onDesignationChange = function() {
 };
 
 async function loadData() {
-    const res = await api('dashboard', {});
-    cachedPayments = res.rawPayments || [];
+    let payments = [];
+    let dbOps = [];
+    let dbTls = [];
+    let dbAgents = [];
 
-    if (!USE_LOCAL_DB) {
-        try {
-            const agRes = await api('agents', {});
-            if (agRes.agents && agRes.agents.length) {
-                localStorage.setItem('pp_agents', JSON.stringify(agRes.agents));
-            }
-            if (agRes.ops_managers && agRes.ops_managers.length) {
-                localStorage.setItem('pp_ops_managers', JSON.stringify(agRes.ops_managers));
-            }
-            if (agRes.team_leaders && agRes.team_leaders.length) {
-                localStorage.setItem('pp_team_leaders', JSON.stringify(agRes.team_leaders));
-            }
-        } catch(e) {
-            console.warn('Could not fetch cloud agents:', e);
-        }
+    try {
+        const [dashRes, agRes] = await Promise.all([
+            api('dashboard', {}).catch(e => { console.warn('Dashboard fetch warning:', e); return {}; }),
+            api('agents', {}).catch(e => { console.warn('Agents fetch warning:', e); return {}; })
+        ]);
+        payments = dashRes.rawPayments || dashRes.rows || [];
+        dbAgents = agRes.agents || agRes.rows || [];
+        dbOps = agRes.ops_managers || [];
+        dbTls = agRes.team_leaders || [];
+    } catch(err) {
+        console.warn('Network / API error in loadData:', err);
+    }
+
+    if (payments.length) {
+        cachedPayments = payments;
+        localStorage.setItem('pp_payments', JSON.stringify(payments));
+    } else {
+        cachedPayments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+    }
+
+    if (dbOps.length) {
+        cachedOpsManagers = dbOps;
+        localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
+    } else {
+        cachedOpsManagers = getOpsManagers();
+    }
+
+    if (dbTls.length) {
+        cachedTeamLeaders = dbTls;
+        localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
+    } else {
+        cachedTeamLeaders = getTeamLeaders();
+    }
+
+    if (dbAgents.length) {
+        localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
     }
 
     cachedTargets = getTargets();
-    cachedOpsManagers = getOpsManagers();
-    cachedTeamLeaders = getTeamLeaders();
     let currentMonth = new Date().toISOString().slice(0, 7);
     if (cachedPayments.length > 0) {
         const months = cachedPayments.map(p => (p.payment_date || '').slice(0, 7)).filter(Boolean).sort();
         if (months.length > 0) currentMonth = months[months.length - 1];
     }
 
-    // Synchronize known agents from payments
-    let mappings = getMappings();
-    const knownAgentNames = new Set(mappings.map(m => (m.agent_name || '').toLowerCase()));
-
-    cachedPayments.forEach(p => {
-        const name = (p.agent_name || '').trim();
-        if (name && !knownAgentNames.has(name.toLowerCase())) {
-            mappings.push({
-                ecode: p.ecode || '',
-                agent_name: name,
-                ops_manager: p.ops_manager || '',
-                tl: p.tl || ''
+    // 1. Build master hierarchy strictly from Database tables
+    let mappings = [];
+    if (dbAgents && dbAgents.length > 0) {
+        mappings = dbAgents.map(a => ({
+            id: a.id || 0,
+            ecode: a.ecode || a.emp_id || '',
+            agent_name: (a.agent_name || a.name || '').trim(),
+            ops_manager: resolveOpsName(a.ops_manager || ''),
+            tl: (a.tl || a.team_leader || '').trim()
+        }));
+    } else {
+        mappings = getMappings();
+        if (mappings.length === 0 && cachedPayments.length > 0) {
+            const known = new Set();
+            cachedPayments.forEach(p => {
+                const name = (p.agent_name || '').trim();
+                if (name && !known.has(name.toLowerCase())) {
+                    mappings.push({
+                        id: 0,
+                        ecode: p.ecode || '',
+                        agent_name: name,
+                        ops_manager: resolveOpsName(p.ops_manager || ''),
+                        tl: p.tl || ''
+                    });
+                    known.add(name.toLowerCase());
+                }
             });
-            knownAgentNames.add(name.toLowerCase());
         }
+    }
 
-        // Auto-discover Ops Managers & TLs if not yet registered
-        if (p.ops_manager) {
-            const opName = p.ops_manager.trim();
-            if (!cachedOpsManagers.some(o => (o.name || '').toLowerCase() === opName.toLowerCase())) {
-                cachedOpsManagers.push({ ecode: '-', name: opName, reporting_to: '-' });
+    // 2. Auto-align missing or unassigned Ops Managers from TL parentage
+    mappings.forEach(m => {
+        if (m.tl && (!m.ops_manager || m.ops_manager.toLowerCase().includes('unassigned'))) {
+            const tlObj = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === m.tl.trim().toLowerCase());
+            if (tlObj) {
+                const tlOps = resolveOpsName(tlObj.ops_manager || tlObj.reporting_to || '');
+                if (tlOps) {
+                    m.ops_manager = tlOps;
+                }
             }
         }
-        if (p.tl) {
-            const tlName = p.tl.trim();
-            if (!cachedTeamLeaders.some(t => (t.name || '').toLowerCase() === tlName.toLowerCase())) {
-                cachedTeamLeaders.push({ ecode: '-', name: tlName, ops_manager: p.ops_manager || '' });
-            }
+        if (m.ops_manager) {
+            m.ops_manager = resolveOpsName(m.ops_manager);
         }
     });
 
-    saveOpsManagers(cachedOpsManagers);
-    saveTeamLeaders(cachedTeamLeaders);
-
-    // Populate Sales & Transactions per Agent
+    // 3. Calculate Month-To-Date Sales and Transaction counts
     mappings.forEach(m => {
         const agPayments = cachedPayments.filter(p => 
             (p.agent_name || '').toLowerCase() === (m.agent_name || '').toLowerCase() && 
@@ -209,27 +285,14 @@ async function loadData() {
         m.txCount = agPayments.length;
     });
 
-    // Auto-correct missing or misaligned ops_managers from TL relationships
-    mappings.forEach(m => {
-        if (m.tl) {
-            const tlObj = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === m.tl.trim().toLowerCase());
-            if (tlObj) {
-                const tlOps = tlObj.ops_manager || tlObj.reporting_to || '';
-                if (tlOps) {
-                    m.ops_manager = tlOps.trim();
-                }
-            }
-        }
-    });
-
     cachedMappings = mappings;
     saveMappings(mappings);
 
-    updateDatalists();
-    renderKPISummary(mappings);
-    renderOpsHierarchy(mappings);
-    renderTlHierarchy(mappings);
-    renderAllAgentsTable(mappings);
+    try { updateDatalists(); } catch(e) { console.error('updateDatalists error:', e); }
+    try { renderKPISummary(mappings); } catch(e) { console.error('renderKPISummary error:', e); }
+    try { renderOpsHierarchy(mappings); } catch(e) { console.error('renderOpsHierarchy error:', e); }
+    try { renderTlHierarchy(mappings); } catch(e) { console.error('renderTlHierarchy error:', e); }
+    try { renderAllAgentsTable(mappings); } catch(e) { console.error('renderAllAgentsTable error:', e); }
 }
 
 function updateDatalists() {
@@ -297,7 +360,7 @@ function renderOpsHierarchy(mappings) {
                 ecode: op.ecode || '-',
                 name: name,
                 reporting_to: op.reporting_to || '-',
-                target: getRoleTarget('OPS', name) || parseFloat(op.target || 0),
+                target: getRoleTarget('OPS', name) || parseFloat(op.monthly_target || op.target || 0),
                 totalSales: 0,
                 totalTx: 0,
                 tls: {}
@@ -307,7 +370,7 @@ function renderOpsHierarchy(mappings) {
 
     // Populate agents and TLs under Ops Managers
     mappings.forEach(m => {
-        const ops = (m.ops_manager || '').trim() || 'Unassigned Ops Manager';
+        let ops = resolveOpsName(m.ops_manager || '') || 'Unassigned Ops Manager';
         const tl = (m.tl || '').trim() || 'Direct / Unassigned TL';
 
         if (!opsGroups[ops]) {
@@ -341,13 +404,13 @@ function renderOpsHierarchy(mappings) {
 
     // Ensure all configured TLs assigned to this Ops are visible
     cachedTeamLeaders.forEach(t => {
-        const opName = (t.ops_manager || t.reporting_to || '').trim();
+        const opName = resolveOpsName(t.ops_manager || t.reporting_to || '');
         const tlName = (t.name || '').trim();
         if (opName && opsGroups[opName]) {
             if (!opsGroups[opName].tls[tlName]) {
                 opsGroups[opName].tls[tlName] = {
                     name: tlName,
-                    target: getRoleTarget('TL', tlName) || parseFloat(t.target || 0),
+                    target: getRoleTarget('TL', tlName) || parseFloat(t.target || t.monthly_target || 0),
                     totalSales: 0,
                     totalTx: 0,
                     agents: []
@@ -453,8 +516,8 @@ function renderTlHierarchy(mappings) {
             tlGroups[name] = {
                 ecode: t.ecode || '-',
                 name: name,
-                opsManager: t.ops_manager || t.reporting_to || 'Unassigned Ops',
-                target: getRoleTarget('TL', name) || parseFloat(t.target || 0),
+                opsManager: resolveOpsName(t.ops_manager || t.reporting_to || '') || 'Unassigned Ops',
+                target: getRoleTarget('TL', name) || parseFloat(t.monthly_target || t.target || 0),
                 totalSales: 0,
                 totalTx: 0,
                 agents: []
@@ -464,7 +527,7 @@ function renderTlHierarchy(mappings) {
 
     mappings.forEach(m => {
         const tl = (m.tl || '').trim() || 'Unassigned TL';
-        const ops = (m.ops_manager || '').trim() || 'Unassigned Ops';
+        const ops = resolveOpsName(m.ops_manager || '') || 'Unassigned Ops';
 
         if (!tlGroups[tl]) {
             tlGroups[tl] = {
@@ -599,120 +662,154 @@ if (agentSearch) {
 // Form Handlers
 // 1. Ops Manager Form
 if (opsForm) {
-    opsForm.onsubmit = e => {
+    opsForm.onsubmit = async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(opsForm));
-        let opsList = getOpsManagers();
-        
-        const idx = opsList.findIndex(o => (o.name || '').toLowerCase() === (data.name || '').toLowerCase());
-        if (idx >= 0) {
-            opsList[idx] = { ...opsList[idx], ...data };
-        } else {
-            opsList.push(data);
+        try {
+            await api('upsert_ops_node', {
+                id: data.id || 0,
+                prev_name: data.prev_name || '',
+                name: data.name,
+                ecode: data.ecode,
+                reporting_to: data.reporting_to,
+                target: data.target
+            });
+            const msg = document.getElementById('opsMsg');
+            msg.textContent = 'Ops Manager saved successfully!';
+            resetOpsForm();
+            await loadData();
+            setTimeout(() => msg.textContent = '', 3000);
+        } catch(err) {
+            alert(err.message);
         }
-
-        saveOpsManagers(opsList);
-        if (data.target) {
-            setRoleTarget('OPS', data.name, data.target);
-        }
-
-        const msg = document.getElementById('opsMsg');
-        msg.textContent = 'Ops Manager saved successfully!';
-        opsForm.reset();
-        loadData();
-        setTimeout(() => msg.textContent = '', 3000);
     };
 }
 
-window.resetOpsForm = () => { opsForm.reset(); };
+window.resetOpsForm = () => {
+    opsForm.reset();
+    const idEl = document.getElementById('opsId');
+    const prevEl = document.getElementById('opsPrevName');
+    if (idEl) idEl.value = '';
+    if (prevEl) prevEl.value = '';
+};
 
 window.editOps = function(name) {
-    const op = cachedOpsManagers.find(o => (o.name || '').toLowerCase() === name.toLowerCase()) || { name: name };
+    const op = cachedOpsManagers.find(o => (o.name || '').toLowerCase() === (name || '').toLowerCase()) || { name: name };
+    const idEl = document.getElementById('opsId');
+    const prevEl = document.getElementById('opsPrevName');
+    if (idEl) idEl.value = op.id || '';
+    if (prevEl) prevEl.value = op.name || '';
     document.getElementById('opsEcode').value = op.ecode || '';
     document.getElementById('opsName').value = op.name || '';
     document.getElementById('opsReporting').value = op.reporting_to || '';
-    document.getElementById('opsTarget').value = getRoleTarget('OPS', op.name) || op.target || '';
+    document.getElementById('opsTarget').value = getRoleTarget('OPS', op.name) || op.monthly_target || op.target || '';
     switchAgentTab('ops');
     document.getElementById('opsEcode').focus();
 };
 
 // 2. Team Leader Form
 if (tlForm) {
-    tlForm.onsubmit = e => {
+    tlForm.onsubmit = async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(tlForm));
-        let tlList = getTeamLeaders();
-
-        const idx = tlList.findIndex(t => (t.name || '').toLowerCase() === (data.name || '').toLowerCase());
-        if (idx >= 0) {
-            tlList[idx] = { ...tlList[idx], ...data };
-        } else {
-            tlList.push(data);
+        try {
+            await api('upsert_tl_node', {
+                id: data.id || 0,
+                prev_name: data.prev_name || '',
+                name: data.name,
+                ecode: data.ecode,
+                ops_manager: data.ops_manager,
+                target: data.target
+            });
+            const msg = document.getElementById('tlMsg');
+            msg.textContent = 'Team Leader saved successfully!';
+            resetTlForm();
+            await loadData();
+            setTimeout(() => msg.textContent = '', 3000);
+        } catch(err) {
+            alert(err.message);
         }
-
-        saveTeamLeaders(tlList);
-        if (data.target) {
-            setRoleTarget('TL', data.name, data.target);
-        }
-
-        const msg = document.getElementById('tlMsg');
-        msg.textContent = 'Team Leader saved successfully!';
-        tlForm.reset();
-        loadData();
-        setTimeout(() => msg.textContent = '', 3000);
     };
 }
 
-window.resetTlForm = () => { tlForm.reset(); };
+window.resetTlForm = () => {
+    tlForm.reset();
+    const idEl = document.getElementById('tlId');
+    const prevEl = document.getElementById('tlPrevName');
+    if (idEl) idEl.value = '';
+    if (prevEl) prevEl.value = '';
+};
 
 window.editTl = function(name) {
-    const tl = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === name.toLowerCase()) || { name: name };
+    const tl = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === (name || '').toLowerCase()) || { name: name };
+    const idEl = document.getElementById('tlId');
+    const prevEl = document.getElementById('tlPrevName');
+    if (idEl) idEl.value = tl.id || '';
+    if (prevEl) prevEl.value = tl.name || '';
     document.getElementById('tlEcode').value = tl.ecode || '';
     document.getElementById('tlName').value = tl.name || '';
     document.getElementById('tlOpsManager').value = tl.ops_manager || '';
-    document.getElementById('tlTarget').value = getRoleTarget('TL', tl.name) || tl.target || '';
+    document.getElementById('tlTarget').value = getRoleTarget('TL', tl.name) || tl.monthly_target || tl.target || '';
     switchAgentTab('tls');
     document.getElementById('tlEcode').focus();
 };
 
 // 3. Unified Member Form
 if (unifiedForm) {
-    unifiedForm.onsubmit = e => {
+    unifiedForm.onsubmit = async e => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(unifiedForm));
         const des = data.designation;
 
-        if (des === 'OPS') {
-            let opsList = getOpsManagers();
-            const idx = opsList.findIndex(o => (o.name || '').toLowerCase() === data.name.toLowerCase());
-            const item = { ecode: data.ecode, name: data.name, reporting_to: data.tl, target: data.target };
-            if (idx >= 0) opsList[idx] = item; else opsList.push(item);
-            saveOpsManagers(opsList);
-            if (data.target) setRoleTarget('OPS', data.name, data.target);
-        } else if (des === 'TL') {
-            let tlList = getTeamLeaders();
-            const idx = tlList.findIndex(t => (t.name || '').toLowerCase() === data.name.toLowerCase());
-            const item = { ecode: data.ecode, name: data.name, ops_manager: data.ops_manager, target: data.target };
-            if (idx >= 0) tlList[idx] = item; else tlList.push(item);
-            saveTeamLeaders(tlList);
-            if (data.target) setRoleTarget('TL', data.name, data.target);
-        } else {
-            let mappings = getMappings();
-            const idx = mappings.findIndex(m => (m.agent_name || '').toLowerCase() === data.name.toLowerCase());
-            const item = { ecode: data.ecode, agent_name: data.name, ops_manager: data.ops_manager, tl: data.tl };
-            if (idx >= 0) mappings[idx] = item; else mappings.push(item);
-            saveMappings(mappings);
-        }
+        try {
+            if (des === 'OPS') {
+                await api('upsert_ops_node', {
+                    id: data.id || 0,
+                    prev_name: data.prev_name || '',
+                    name: data.name,
+                    ecode: data.ecode,
+                    reporting_to: data.tl,
+                    target: data.target
+                });
+            } else if (des === 'TL') {
+                await api('upsert_tl_node', {
+                    id: data.id || 0,
+                    prev_name: data.prev_name || '',
+                    name: data.name,
+                    ecode: data.ecode,
+                    ops_manager: data.ops_manager,
+                    target: data.target
+                });
+            } else {
+                await api('upsert_agent_node', {
+                    id: data.id || 0,
+                    prev_name: data.prev_name || '',
+                    name: data.name,
+                    ecode: data.ecode,
+                    ops_manager: data.ops_manager,
+                    tl: data.tl
+                });
+            }
 
-        const msg = document.getElementById('unifiedMsg');
-        msg.textContent = `${des} saved successfully!`;
-        unifiedForm.reset();
-        loadData();
-        setTimeout(() => msg.textContent = '', 3000);
+            const msg = document.getElementById('unifiedMsg');
+            msg.textContent = `${des} saved successfully!`;
+            resetUnifiedForm();
+            await loadData();
+            setTimeout(() => msg.textContent = '', 3000);
+        } catch(err) {
+            alert(err.message);
+        }
     };
 }
 
-window.resetUnifiedForm = () => { unifiedForm.reset(); };
+window.resetUnifiedForm = () => {
+    unifiedForm.reset();
+    const idEl = document.getElementById('unifiedId');
+    const prevEl = document.getElementById('unifiedPrevName');
+    if (idEl) idEl.value = '';
+    if (prevEl) prevEl.value = '';
+    onDesignationChange();
+};
 
 window.editAgent = function(idx) {
     const m = cachedMappings[idx];
@@ -720,6 +817,11 @@ window.editAgent = function(idx) {
 
     document.getElementById('inputDesignation').value = 'AGENT';
     onDesignationChange();
+
+    const idEl = document.getElementById('unifiedId');
+    const prevEl = document.getElementById('unifiedPrevName');
+    if (idEl) idEl.value = m.id || '';
+    if (prevEl) prevEl.value = m.agent_name || '';
 
     document.getElementById('inputEcode').value = m.ecode || '';
     document.getElementById('inputName').value = m.agent_name || '';
@@ -730,58 +832,48 @@ window.editAgent = function(idx) {
     document.getElementById('inputEcode').focus();
 };
 
-window.deleteAgent = function(idx) {
+window.deleteAgent = async function(idx) {
     const m = cachedMappings[idx];
     if (!m) return;
 
     if (confirm(`Delete agent ${m.agent_name}?`)) {
-        let mappings = getMappings();
-        mappings = mappings.filter(item => (item.agent_name || '').toLowerCase() !== (m.agent_name || '').toLowerCase());
-        saveMappings(mappings);
-        loadData();
+        try {
+            await api('remove_agent_node', { id: m.id || 0, name: m.agent_name, ecode: m.ecode });
+            cachedMappings = cachedMappings.filter((item, i) => i !== idx && (m.id ? item.id !== m.id : item.agent_name !== m.agent_name));
+            localStorage.setItem('pp_agents', JSON.stringify(cachedMappings));
+            localStorage.setItem('pp_mappings', JSON.stringify(cachedMappings));
+            await loadData();
+        } catch(err) {
+            alert(err.message);
+        }
     }
 };
 
-window.deleteOps = function(name) {
+window.deleteOps = async function(name) {
+    const op = cachedOpsManagers.find(o => (o.name || '').toLowerCase() === (name || '').toLowerCase());
     if (confirm(`Delete Ops Manager ${name}?\n(Agents will remain in the directory but their ops manager will be unassigned)`)) {
-        let opsList = getOpsManagers();
-        opsList = opsList.filter(o => (o.name || '').toLowerCase() !== name.toLowerCase());
-        saveOpsManagers(opsList);
-        
-        let mappings = getMappings();
-        mappings.forEach(m => {
-            if ((m.ops_manager || '').toLowerCase() === name.toLowerCase()) {
-                m.ops_manager = '';
-            }
-        });
-        saveMappings(mappings);
-        
-        let tlList = getTeamLeaders();
-        tlList.forEach(t => {
-            if ((t.ops_manager || '').toLowerCase() === name.toLowerCase()) {
-                t.ops_manager = '';
-            }
-        });
-        saveTeamLeaders(tlList);
-        
-        loadData();
+        try {
+            await api('remove_ops_node', { id: op ? op.id : 0, name });
+            cachedOpsManagers = cachedOpsManagers.filter(o => (o.name || '').toLowerCase() !== (name || '').toLowerCase());
+            localStorage.setItem('pp_ops_managers', JSON.stringify(cachedOpsManagers));
+            await loadData();
+        } catch(err) {
+            alert(err.message);
+        }
     }
 };
 
-window.deleteTl = function(name) {
+window.deleteTl = async function(name) {
+    const tl = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === (name || '').toLowerCase());
     if (confirm(`Delete Team Leader ${name}?\n(Agents will remain in the directory but their TL will be unassigned)`)) {
-        let tlList = getTeamLeaders();
-        tlList = tlList.filter(t => (t.name || '').toLowerCase() !== name.toLowerCase());
-        saveTeamLeaders(tlList);
-        
-        let mappings = getMappings();
-        mappings.forEach(m => {
-            if ((m.tl || '').toLowerCase() === name.toLowerCase()) {
-                m.tl = '';
-            }
-        });
-        saveMappings(mappings);
-        loadData();
+        try {
+            await api('remove_tl_node', { id: tl ? tl.id : 0, name });
+            cachedTeamLeaders = cachedTeamLeaders.filter(t => (t.name || '').toLowerCase() !== (name || '').toLowerCase());
+            localStorage.setItem('pp_team_leaders', JSON.stringify(cachedTeamLeaders));
+            await loadData();
+        } catch(err) {
+            alert(err.message);
+        }
     }
 };
 
@@ -796,7 +888,7 @@ if (importHierarchyFile) {
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = function(evt) {
+        reader.onload = async function(evt) {
             try {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
@@ -809,58 +901,34 @@ if (importHierarchyFile) {
 
                 let opsAdded = 0, tlAdded = 0, agentsAdded = 0;
 
-                rows.forEach(r => {
+                for (const r of rows) {
                     const ecode = r['EMP ID'] || r['Emp ID'] || r['EmpID'] || r['E-Code'] || r['ecode'] || r['Code'] || '';
                     const name = (r['Name'] || r['Agent Name'] || r['Employee Name'] || '').trim();
                     const rep1 = (r['Reporting Level 1'] || r['Reporting Manager'] || r['Reporting'] || '').trim();
                     const des = (r['Designation'] || r['Role'] || '').trim().toLowerCase();
 
-                    if (!name) return;
+                    if (!name) continue;
 
                     if (des.includes('operations') || des.includes('ops')) {
-                        // Register as Ops Manager
-                        const ex = opsList.find(o => (o.name || '').toLowerCase() === name.toLowerCase());
-                        if (ex) {
-                            if (ecode) ex.ecode = ecode;
-                            if (rep1) ex.reporting_to = rep1;
-                        } else {
-                            opsList.push({ ecode: ecode || '', name: name, reporting_to: rep1 });
+                        try {
+                            await api('upsert_ops_node', { name, ecode, reporting_to: rep1 });
                             opsAdded++;
-                        }
+                        } catch(e) {}
                     } else if (des.includes('team leader') || des.includes('tl')) {
-                        // Register as Team Leader
-                        const ex = tlList.find(t => (t.name || '').toLowerCase() === name.toLowerCase());
-                        if (ex) {
-                            if (ecode) ex.ecode = ecode;
-                            if (rep1) ex.ops_manager = rep1;
-                        } else {
-                            tlList.push({ ecode: ecode || '', name: name, ops_manager: rep1 });
+                        try {
+                            await api('upsert_tl_node', { name, ecode, ops_manager: rep1 });
                             tlAdded++;
-                        }
+                        } catch(e) {}
                     } else {
-                        // Register as Sales Agent
-                        const ex = mappings.find(m => (m.agent_name || '').toLowerCase() === name.toLowerCase());
-                        if (ex) {
-                            if (ecode) ex.ecode = ecode;
-                            if (rep1) ex.tl = rep1;
-                        } else {
-                            mappings.push({
-                                ecode: ecode || '',
-                                agent_name: name,
-                                ops_manager: '',
-                                tl: rep1
-                            });
+                        try {
+                            await api('upsert_agent_node', { name, ecode, ops_manager: '', tl: rep1 });
                             agentsAdded++;
-                        }
+                        } catch(e) {}
                     }
-                });
+                }
 
-                saveOpsManagers(opsList);
-                saveTeamLeaders(tlList);
-                saveMappings(mappings);
-                loadData();
-
-                alert(`Hierarchy Imported Successfully!\n• Ops Managers: +${opsAdded}\n• Team Leaders: +${tlAdded}\n• Agents: +${agentsAdded}`);
+                await loadData();
+                alert(`Hierarchy Imported Successfully to Database!\n• Ops Managers: +${opsAdded}\n• Team Leaders: +${tlAdded}\n• Agents: +${agentsAdded}`);
                 importHierarchyFile.value = '';
             } catch (err) {
                 alert('Hierarchy Import Error: ' + err.message);
@@ -877,38 +945,31 @@ if (importAgentsFile) {
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = function(evt) {
+        reader.onload = async function(evt) {
             try {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-                let mappings = getMappings();
                 let count = 0;
 
-                rows.forEach(r => {
+                for (const r of rows) {
                     let ecode = r['EMP ID'] || r['Emp ID'] || r['E-Code'] || r['ecode'] || '';
                     let name = (r['Agent Name'] || r['Name'] || '').trim();
                     let ops = (r['Ops Manager'] || r['ops_manager'] || '').trim();
                     let tl = (r['TL Name'] || r['tl'] || r['Team Leader'] || '').trim();
 
                     if (name) {
-                        const existing = mappings.find(m => (m.agent_name || '').toLowerCase() === name.toLowerCase());
-                        if (existing) {
-                            if (ecode) existing.ecode = ecode;
-                            if (ops) existing.ops_manager = ops;
-                            if (tl) existing.tl = tl;
-                        } else {
-                            mappings.push({ ecode: ecode || '', agent_name: name, ops_manager: ops, tl: tl });
-                        }
-                        count++;
+                        try {
+                            await api('upsert_agent_node', { name, ecode, ops_manager: ops, tl });
+                            count++;
+                        } catch(e) {}
                     }
-                });
+                }
 
-                saveMappings(mappings);
-                loadData();
-                alert(`Successfully imported ${count} agents into directory!`);
+                await loadData();
+                alert(`Successfully imported ${count} agents into the database directory!`);
                 importAgentsFile.value = '';
             } catch (err) {
                 alert('Import Error: ' + err.message);

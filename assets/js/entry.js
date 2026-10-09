@@ -15,10 +15,39 @@ function computeInr() {
 f.usdt.addEventListener('input', computeInr);
 f.divided_by.addEventListener('input', computeInr);
 
+// In-memory cache loaded from live DB
+let dbAgents = [];
+let dbClients = [];
+
+async function initEntryData() {
+    try {
+        const [agRes, clRes] = await Promise.all([
+            api('agents', {}).catch(() => ({ agents: [] })),
+            api('clients', {}).catch(() => ({ rows: [] }))
+        ]);
+        if (agRes.agents && agRes.agents.length) {
+            dbAgents = agRes.agents;
+            localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
+        } else {
+            dbAgents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
+        }
+        if (clRes.rows && clRes.rows.length) {
+            dbClients = clRes.rows;
+            localStorage.setItem('pp_clients', JSON.stringify(dbClients));
+        } else {
+            dbClients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+        }
+    } catch(e) {
+        dbAgents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
+        dbClients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+    }
+}
+initEntryData();
+
 // Agent auto-fetch
 function autofillAgent(key, value) {
     if (!value) return;
-    const mappings = JSON.parse(localStorage.getItem('pp_agents') || localStorage.getItem('pp_mappings') || '[]');
+    const mappings = dbAgents.length ? dbAgents : JSON.parse(localStorage.getItem('pp_agents') || localStorage.getItem('pp_mappings') || '[]');
     const match = mappings.find(m => (m[key] || '').toLowerCase() === value.toLowerCase());
     if (match) {
         if (key !== 'ecode') f.ecode.value = match.ecode || '';
@@ -31,7 +60,7 @@ function autofillAgent(key, value) {
 // Client auto-fetch
 function autofillClient(key, value) {
     if (!value) return;
-    const clients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+    const clients = dbClients.length ? dbClients : JSON.parse(localStorage.getItem('pp_clients') || '[]');
     const match = clients.find(c => (c[key] || '').toLowerCase() === value.toLowerCase());
     if (match) {
         if (key !== 'client_name' && match.client_name) f.client_name.value = match.client_name;
@@ -61,21 +90,18 @@ f.onsubmit = async (e) => {
     try {
         await api('create_payment', data);
 
-        // Auto-save client if new
-        if (data.client_name && data.client_number) {
-            let clients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
-            const exists = clients.find(c => c.client_number === data.client_number);
-            if (!exists) {
-                clients.push({
-                    client_name: data.client_name,
-                    client_number: data.client_number,
+        // Auto-save client directly to MySQL if new
+        if (data.client_name || data.client_number) {
+            try {
+                await api('upsert_client_node', {
+                    client_name: data.client_name || 'Unknown Client',
+                    client_number: data.client_number || '',
                     email_id: data.email_id || '',
                     pan_no: data.pan_no || '',
                     aadhar_no: data.aadhar_no || '',
                     state: data.state || ''
                 });
-                localStorage.setItem('pp_clients', JSON.stringify(clients));
-            }
+            } catch(e) {}
         }
 
         msg.textContent = 'Payment recorded successfully!';

@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hierarchy & Agents | Payment Portal</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💳</text></svg>">
     <link rel="stylesheet" href="assets/css/app.css?v=3">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
@@ -88,6 +89,8 @@
                     </div>
                 </div>
                 <form id="opsForm" class="form-grid" autocomplete="off">
+                    <input type="hidden" name="id" id="opsId">
+                    <input type="hidden" name="prev_name" id="opsPrevName">
                     <label>
                         Employee ID (EMP ID)
                         <input name="ecode" id="opsEcode" placeholder="e.g. D02122 (Optional)">
@@ -135,6 +138,8 @@
                     </div>
                 </div>
                 <form id="tlForm" class="form-grid" autocomplete="off">
+                    <input type="hidden" name="id" id="tlId">
+                    <input type="hidden" name="prev_name" id="tlPrevName">
                     <label>
                         Employee ID (EMP ID)
                         <input name="ecode" id="tlEcode" placeholder="e.g. D02119 (Optional)">
@@ -213,6 +218,8 @@
                 </div>
             </div>
             <form id="unifiedMemberForm" class="form-grid" autocomplete="off">
+                <input type="hidden" name="id" id="unifiedId">
+                <input type="hidden" name="prev_name" id="unifiedPrevName">
                 <label>
                     Role / Designation
                     <select name="designation" id="inputDesignation" onchange="onDesignationChange()">
@@ -253,8 +260,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=3"></script>
+    <script src="assets/js/api.js?v=5"></script>
     <script src="assets/js/auth.js"></script>
-    <script src="assets/js/agents.js"></script>
+    <script src="assets/js/agents.js?v=5"></script>
 </body>
 </html>

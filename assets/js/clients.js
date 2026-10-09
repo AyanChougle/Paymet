@@ -8,22 +8,18 @@ const exportClientsBtn = document.getElementById('exportClientsBtn');
 
 const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function getClients() {
-    return JSON.parse(localStorage.getItem('pp_clients') || '[]');
-}
-
-function saveClients(clients) {
-    localStorage.setItem('pp_clients', JSON.stringify(clients));
-}
+let cachedClients = [];
 
 async function getClientsData() {
-    if (!USE_LOCAL_DB) {
-        try {
-            const res = await api('clients', {});
-            if (res.rows && res.rows.length) return res.rows;
-        } catch(e) {}
+    try {
+        const res = await api('clients', {});
+        cachedClients = res.rows || [];
+        localStorage.setItem('pp_clients', JSON.stringify(cachedClients));
+        return cachedClients;
+    } catch(e) {
+        cachedClients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+        return cachedClients;
     }
-    return JSON.parse(localStorage.getItem('pp_clients') || '[]');
 }
 
 async function render() {
@@ -36,11 +32,11 @@ async function render() {
         <td><code>${c.pan_no || '-'}</code></td>
         <td><code>${c.aadhar_no || '-'}</code></td>
         <td>${c.state || '-'}</td>
-        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteClient(${idx})">Delete</button></td>
+        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteClient(${c.id || 0}, '${(c.client_number||'').replace(/'/g, "\\'")}', '${(c.client_name||'').replace(/'/g, "\\'")}')">Delete</button></td>
     </tr>`).join('') || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:20px;">No registered clients found.</td></tr>';
 
     // 2. Render Paid Clients Breakdown (Sheet 3 from Excel)
-    const dash = await api('dashboard', {});
+    const dash = await api('dashboard', {}).catch(() => ({ rawPayments: [] }));
     const rawPayments = dash.rawPayments || [];
 
     const groups = {};
@@ -101,33 +97,30 @@ async function render() {
     window.currentPaidClientsGroup = groupArray;
 }
 
-window.deleteClient = function(idx) {
-    if (confirm('Delete this client?')) {
-        let clients = getClients();
-        clients.splice(idx, 1);
-        saveClients(clients);
-        render();
+window.deleteClient = async function(id, clientNumber, clientName) {
+    if (confirm(`Delete client "${clientName || clientNumber}" from database?`)) {
+        try {
+            await api('remove_client_node', { id, client_number: clientNumber, client_name: clientName });
+            await render();
+        } catch(e) {
+            alert('Failed to delete client: ' + e.message);
+        }
     }
 };
 
-form.onsubmit = e => {
+form.onsubmit = async e => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(form));
-    let clients = getClients();
 
-    const existingIndex = clients.findIndex(c => (data.client_number && c.client_number === data.client_number) || (data.email_id && c.email_id === data.email_id));
-    if (existingIndex >= 0) {
-        clients[existingIndex] = data;
-        msg.textContent = 'Client profile updated!';
-    } else {
-        clients.push(data);
-        msg.textContent = 'New client added!';
+    try {
+        await api('upsert_client_node', data);
+        msg.textContent = 'Client saved to database!';
+        form.reset();
+        await render();
+        setTimeout(() => msg.textContent = '', 3000);
+    } catch(err) {
+        alert('Error saving client: ' + err.message);
     }
-
-    saveClients(clients);
-    form.reset();
-    render();
-    setTimeout(() => msg.textContent = '', 3000);
 };
 
 // Import Clients Excel
@@ -137,17 +130,16 @@ if (importClientsFile) {
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = function(evt) {
+        reader.onload = async function(evt) {
             try {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const sheet = workbook.Sheets[workbook.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-                let clients = getClients();
                 let count = 0;
 
-                rows.forEach(r => {
+                for (const r of rows) {
                     let name = r['Client Name'] || r['client_name'] || r['Name'] || r['Client'] || '';
                     let num = r['Client Number'] || r['client_number'] || r['Phone'] || r['Mobile'] || '';
                     let email = r['Email ID'] || r['email_id'] || r['Email'] || '';
@@ -156,22 +148,22 @@ if (importClientsFile) {
                     let state = r['STATE'] || r['state'] || r['State'] || '';
 
                     if (name || num) {
-                        const existing = clients.find(c => (num && c.client_number === String(num)) || (name && (c.client_name || '').toLowerCase() === name.toLowerCase()));
-                        if (existing) {
-                            if (email) existing.email_id = email;
-                            if (pan) existing.pan_no = pan;
-                            if (aadhar) existing.aadhar_no = aadhar;
-                            if (state) existing.state = state;
-                        } else {
-                            clients.push({ client_name: name || 'Unknown Client', client_number: String(num || '-'), email_id: email, pan_no: pan, aadhar_no: aadhar, state: state });
-                        }
-                        count++;
+                        try {
+                            await api('upsert_client_node', {
+                                client_name: name || 'Unknown Client',
+                                client_number: String(num || ''),
+                                email_id: email,
+                                pan_no: pan,
+                                aadhar_no: aadhar,
+                                state: state
+                            });
+                            count++;
+                        } catch(e) {}
                     }
-                });
+                }
 
-                saveClients(clients);
-                render();
-                alert(`Successfully imported ${count} clients into directory!`);
+                await render();
+                alert(`Successfully imported ${count} clients into the database!`);
                 importClientsFile.value = '';
             } catch (err) {
                 alert('Import Error: ' + err.message);
@@ -184,7 +176,7 @@ if (importClientsFile) {
 // Export Clients Excel
 if (exportClientsBtn) {
     exportClientsBtn.onclick = function() {
-        const clients = getClients();
+        const clients = cachedClients || [];
         const paidGroups = window.currentPaidClientsGroup || [];
 
         const wb = XLSX.utils.book_new();

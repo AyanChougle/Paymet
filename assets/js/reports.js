@@ -406,38 +406,30 @@ if (importReportsFile) {
                             }
                         }
 
-                        // Sync Agent
+                        // Sync Agent to DB
                         if (dbData.agent_name && dbData.agent_name !== 'Unassigned Agent') {
-                            const exA = agents.find(a => (a.agent_name || '').toLowerCase() === dbData.agent_name.toLowerCase());
-                            if (!exA) {
-                                agents.push({
-                                    ecode: dbData.ecode || `EMP-${100 + agents.length + 1}`,
-                                    agent_name: dbData.agent_name,
+                            try {
+                                await api('upsert_agent_node', {
+                                    name: dbData.agent_name,
+                                    ecode: dbData.ecode || '',
                                     ops_manager: dbData.ops_manager || '',
                                     tl: dbData.tl || ''
                                 });
-                            } else {
-                                if (!exA.ecode && dbData.ecode) exA.ecode = dbData.ecode;
-                                if (!exA.ops_manager && dbData.ops_manager) exA.ops_manager = dbData.ops_manager;
-                                if (!exA.tl && dbData.tl) exA.tl = dbData.tl;
-                            }
+                            } catch(e) {}
                         }
 
-                        // Sync Client
+                        // Sync Client to DB
                         if (dbData.client_name || dbData.client_number) {
-                            const cNum = dbData.client_number || '';
-                            const cName = dbData.client_name || '';
-                            const exC = clients.find(c => (cNum && c.client_number === cNum) || (cName && (c.client_name || '').toLowerCase() === cName.toLowerCase()));
-                            if (!exC) {
-                                clients.push({
-                                    client_name: cName || 'Unknown Client',
-                                    client_number: cNum || '-',
+                            try {
+                                await api('upsert_client_node', {
+                                    client_name: dbData.client_name || 'Unknown Client',
+                                    client_number: dbData.client_number || '',
                                     email_id: dbData.email_id || '',
                                     pan_no: dbData.pan_no || '',
                                     aadhar_no: dbData.aadhar_no || '',
                                     state: dbData.state || ''
                                 });
-                            }
+                            } catch(e) {}
                         }
                     }
                 }
