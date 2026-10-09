@@ -92,12 +92,14 @@ async function load() {
 
     userList.innerHTML = j.users.map(u => {
         const cUser = getCurrentUser();
-        const isCurrent = cUser && cUser.id === u.id;
+        const isCurrent = cUser && (cUser.id === u.id || (u.email && cUser.email === u.email));
+        const displayName = (u.name && u.name !== u.email) ? u.name : (u.name || u.username || 'System User');
+        const displayEmail = (u.email && u.email !== 'undefined') ? u.email : (u.username || '-');
         const deleteBtn = isCurrent ? `<span style="font-size:11px; color:var(--text-muted);">Current User</span>` :
-            `<button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteUser(${u.id}, '${u.name.replace(/'/g, "\\'")}')">Delete</button>`;
+            `<button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteUser(${u.id}, '${displayName.replace(/'/g, "\\'")}')">Delete</button>`;
         return `<tr>
-            <td><strong>${u.name}</strong></td>
-            <td>${u.email}</td>
+            <td><strong>${displayName}</strong></td>
+            <td>${displayEmail}</td>
             <td><span style="font-weight:700; color:var(--accent); font-size:11.5px;">${u.role}</span></td>
             <td style="text-align:right;">${deleteBtn}</td>
         </tr>`;

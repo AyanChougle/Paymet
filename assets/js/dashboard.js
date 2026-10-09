@@ -70,16 +70,47 @@ window.switchDashTab = function(tabName, el) {
 };
 
 async function load() {
-    const res = await api('dashboard', {});
-    const payments = res.rawPayments || [];
+    let payments = [];
+    let dbOps = [];
+    let dbTls = [];
+    let dbAgents = [];
+    let lastEntry = null;
+
+    try {
+        const [dashRes, agentRes] = await Promise.all([
+            api('dashboard', {}),
+            api('agents', {})
+        ]);
+        payments = dashRes.rawPayments || [];
+        lastEntry = dashRes.lastEntry || null;
+        dbOps = agentRes.ops_managers || [];
+        dbTls = agentRes.team_leaders || [];
+        dbAgents = agentRes.agents || [];
+    } catch (e) {
+        console.warn('API fetch warning, reading local storage:', e);
+        payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+        dbOps = JSON.parse(localStorage.getItem('pp_ops_managers') || '[]');
+        dbTls = JSON.parse(localStorage.getItem('pp_team_leaders') || '[]');
+        dbAgents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
+        lastEntry = payments.length ? payments[payments.length - 1] : null;
+    }
+
+    if ((!payments || payments.length === 0) && localStorage.getItem('pp_payments')) {
+        payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+        if (payments.length && !lastEntry) lastEntry = payments[payments.length - 1];
+    }
+
+    // Cache database lists locally for fallback
+    if (dbOps.length) localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
+    if (dbTls.length) localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
+    if (dbAgents.length) localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
 
     // Last Entry Audit Display
     const lastEntryBadge = document.getElementById('lastEntryBadge');
-    if (lastEntryBadge && res.lastEntry) {
-        const le = res.lastEntry;
-        const entryBy = le.created_by_name || 'System';
-        const entryTime = le.created_at || le.payment_date || '-';
-        lastEntryBadge.innerHTML = `Last Entry: <strong>${entryTime}</strong> by <span style="color:var(--accent); font-weight:700;">${entryBy}</span> (${fmtInr(le.inr_amount)})`;
+    if (lastEntryBadge && lastEntry) {
+        const entryBy = lastEntry.created_by_name || 'System';
+        const entryTime = lastEntry.created_at || lastEntry.payment_date || '-';
+        lastEntryBadge.innerHTML = `Last Entry: <strong>${entryTime}</strong> by <span style="color:var(--accent); font-weight:700;">${entryBy}</span> (${fmtInr(lastEntry.inr_amount)})`;
     }
 
     // Populate months in dropdown if needed
@@ -164,6 +195,70 @@ async function load() {
     const modeMap = { 'P2P': { usdt: 0, inr: 0, count: 0 }, 'D P2P': { usdt: 0, inr: 0, count: 0 } };
     const compMap = { 'Digital Verse': { usdt: 0, inr: 0, count: 0 }, 'World of Crypto': { usdt: 0, inr: 0, count: 0 } };
 
+    const opsDbNames = new Set();
+    const tlDbNames = new Set();
+
+    // 1. Build Ops Managers map strictly from Database (pp_ops_managers)
+    dbOps.forEach(o => {
+        const name = (o.name || '').trim();
+        if (name) {
+            opsDbNames.add(name.toLowerCase());
+            opsMap[name] = {
+                name: name,
+                mtd: 0,
+                ftd: 0,
+                teams: new Set(),
+                target: parseFloat(o.monthly_target || getRoleTarget('OPS', name) || 0),
+                modeMap: { 'P2P': 0, 'D P2P': 0 },
+                compMap: { 'Digital Verse': 0, 'World of Crypto': 0 }
+            };
+        }
+    });
+
+    // 2. Build Team Leaders map strictly from Database (pp_team_leaders)
+    dbTls.forEach(t => {
+        const name = (t.name || '').trim();
+        if (name) {
+            tlDbNames.add(name.toLowerCase());
+            tlMap[name] = {
+                name: name,
+                mtd: 0,
+                ftd: 0,
+                opsManager: (t.reporting_to || t.ops_manager || '').trim(),
+                target: parseFloat(t.monthly_target || getRoleTarget('TL', name) || 0)
+            };
+            const assignedOps = (t.reporting_to || t.ops_manager || '').trim();
+            if (assignedOps && opsMap[assignedOps]) {
+                opsMap[assignedOps].teams.add(name);
+            }
+        }
+    });
+
+    // 3. Build Agent Directory lookup maps from Database (pp_agents)
+    const agentToTl = {};
+    const agentToOps = {};
+    const tlToOps = {};
+
+    dbTls.forEach(t => {
+        if (t.name && (t.reporting_to || t.ops_manager)) {
+            tlToOps[t.name.toLowerCase().trim()] = (t.reporting_to || t.ops_manager).trim();
+        }
+    });
+
+    dbAgents.forEach(a => {
+        const agName = (a.agent_name || '').toLowerCase().trim();
+        if (agName) {
+            if (a.tl) agentToTl[agName] = a.tl.trim();
+            if (a.ops_manager) agentToOps[agName] = a.ops_manager.trim();
+
+            const realName = (a.agent_name || '').trim();
+            if (!agentMap[realName]) {
+                agentMap[realName] = { name: realName, mtd: 0, ftd: 0 };
+            }
+        }
+    });
+
+    // Aggregate Payments
     payments.forEach(p => {
         const date = p.payment_date || '';
         const inr = parseFloat(p.inr_amount || 0);
@@ -174,39 +269,77 @@ async function load() {
         const isMtd = (selMonth === 'overall') || date.startsWith(selMonth);
         const isFtd = (date === selFtd);
 
+        const agName = (p.agent_name || '').trim() || 'Unassigned';
+
+        // Resolve TL (strictly matching DB Team Leaders)
+        let rawTl = (p.tl || '').trim();
+        if (!rawTl && agName !== 'Unassigned') {
+            rawTl = agentToTl[agName.toLowerCase()] || '';
+        }
+        let tlName = tlDbNames.has(rawTl.toLowerCase()) ? rawTl : (agentToTl[agName.toLowerCase()] || rawTl || 'Unassigned TL');
+
+        // Resolve Ops Manager (strictly matching DB Ops Managers)
+        let rawOps = (p.ops_manager || '').trim();
+        if (!rawOps || !opsDbNames.has(rawOps.toLowerCase())) {
+            if (tlName && tlToOps[tlName.toLowerCase()]) rawOps = tlToOps[tlName.toLowerCase()];
+            if (!rawOps && agName !== 'Unassigned') rawOps = agentToOps[agName.toLowerCase()] || '';
+        }
+        let opsName = opsDbNames.has(rawOps.toLowerCase()) ? rawOps : 'Unassigned Ops';
+
+        const modeKey = mode.toUpperCase().includes('D') ? 'D P2P' : 'P2P';
+        const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
+
         if (isMtd) {
             totalInr += inr;
             totalUsdt += usdt;
             totalTx++;
 
-            const modeKey = mode.toUpperCase().includes('D') ? 'D P2P' : 'P2P';
             if (!modeMap[modeKey]) modeMap[modeKey] = { usdt: 0, inr: 0, count: 0 };
             modeMap[modeKey].usdt += usdt;
             modeMap[modeKey].inr += inr;
             modeMap[modeKey].count++;
 
-            const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
             if (!compMap[compKey]) compMap[compKey] = { usdt: 0, inr: 0, count: 0 };
             compMap[compKey].usdt += usdt;
             compMap[compKey].inr += inr;
             compMap[compKey].count++;
         }
 
-        const agName = p.agent_name || 'Unassigned';
+        // Agent Sales
         if (!agentMap[agName]) agentMap[agName] = { name: agName, mtd: 0, ftd: 0 };
         if (isMtd) agentMap[agName].mtd += inr;
         if (isFtd) agentMap[agName].ftd += inr;
 
-        const tlName = p.tl || 'Unassigned';
-        if (!tlMap[tlName]) tlMap[tlName] = { name: tlName, mtd: 0, ftd: 0 };
-        if (isMtd) tlMap[tlName].mtd += inr;
-        if (isFtd) tlMap[tlName].ftd += inr;
+        // TL Sales (Only true TLs from DB)
+        if (!tlMap[tlName] && (tlDbNames.has(tlName.toLowerCase()) || isMtd)) {
+            tlMap[tlName] = { name: tlName, mtd: 0, ftd: 0, opsManager: opsName, target: getRoleTarget('TL', tlName) };
+        }
+        if (tlMap[tlName]) {
+            if (isMtd) tlMap[tlName].mtd += inr;
+            if (isFtd) tlMap[tlName].ftd += inr;
+        }
 
-        const opsName = p.ops_manager || 'Unassigned';
-        if (!opsMap[opsName]) opsMap[opsName] = { name: opsName, mtd: 0, ftd: 0, teams: new Set() };
-        if (p.tl) opsMap[opsName].teams.add(p.tl);
-        if (isMtd) opsMap[opsName].mtd += inr;
-        if (isFtd) opsMap[opsName].ftd += inr;
+        // Ops Manager Sales (Only true Ops Managers from DB)
+        if (!opsMap[opsName] && (opsDbNames.has(opsName.toLowerCase()) || isMtd)) {
+            opsMap[opsName] = { 
+                name: opsName, 
+                mtd: 0, 
+                ftd: 0, 
+                teams: new Set(),
+                target: getRoleTarget('OPS', opsName),
+                modeMap: { 'P2P': 0, 'D P2P': 0 },
+                compMap: { 'Digital Verse': 0, 'World of Crypto': 0 }
+            };
+        }
+        if (opsMap[opsName]) {
+            if (tlName !== 'Unassigned TL' && tlDbNames.has(tlName.toLowerCase())) opsMap[opsName].teams.add(tlName);
+            if (isMtd) {
+                opsMap[opsName].mtd += inr;
+                opsMap[opsName].modeMap[modeKey] = (opsMap[opsName].modeMap[modeKey] || 0) + inr;
+                opsMap[opsName].compMap[compKey] = (opsMap[opsName].compMap[compKey] || 0) + inr;
+            }
+            if (isFtd) opsMap[opsName].ftd += inr;
+        }
     });
 
     // Update Minimal KPI Strip
@@ -255,20 +388,22 @@ async function load() {
         </tr>`;
     }).join('');
 
-    document.getElementById('agentTableBody').innerHTML = agentRows || '<tr><td colspan="5" class="text-muted" style="text-align:center; padding:18px;">No payments found for this period.</td></tr>';
-    document.getElementById('agentTableFoot').innerHTML = `<tr>
+    const agentBody = document.getElementById('agentTableBody');
+    const agentFoot = document.getElementById('agentTableFoot');
+    if (agentBody) agentBody.innerHTML = agentRows || '<tr><td colspan="5" class="text-muted" style="text-align:center; padding:18px;">No payments found for this period.</td></tr>';
+    if (agentFoot) agentFoot.innerHTML = `<tr>
         <td colspan="3">Grand Total</td>
         <td>${fmtInr(agentMtdTotal)}</td>
         <td>${fmtInr(agentFtdTotal)}</td>
     </tr>`;
 
-    // 2. Render Team Leaders Table
-    const sortedTLs = Object.values(tlMap).sort((a, b) => b.mtd - a.mtd);
+    // 2. Render Team Leaders Table (ONLY True DB Team Leaders)
+    const sortedTLs = Object.values(tlMap).filter(t => t.name !== 'Unassigned TL').sort((a, b) => b.mtd - a.mtd);
     let tlMtdTotal = 0, tlFtdTotal = 0;
     const tlRows = sortedTLs.map((tl, i) => {
         tlMtdTotal += tl.mtd;
         tlFtdTotal += tl.ftd;
-        const target = getRoleTarget('TL', tl.name);
+        const target = tl.target || getRoleTarget('TL', tl.name);
         return `<tr>
             <td style="color:var(--text-muted);">${i + 1}</td>
             <td><strong>${tl.name}</strong></td>
@@ -279,25 +414,33 @@ async function load() {
         </tr>`;
     }).join('');
 
-    document.getElementById('tlTableBody').innerHTML = tlRows || '<tr><td colspan="6" class="text-muted" style="text-align:center; padding:18px;">No TL records.</td></tr>';
-    document.getElementById('tlTableFoot').innerHTML = `<tr>
+    const tlBody = document.getElementById('tlTableBody');
+    const tlFoot = document.getElementById('tlTableFoot');
+    if (tlBody) tlBody.innerHTML = tlRows || '<tr><td colspan="6" class="text-muted" style="text-align:center; padding:18px;">No TL records.</td></tr>';
+    if (tlFoot) tlFoot.innerHTML = `<tr>
         <td colspan="2">Grand Total</td>
         <td>${fmtInr(tlMtdTotal)}</td>
         <td>${fmtInr(tlFtdTotal)}</td>
         <td colspan="2">-</td>
     </tr>`;
 
-    // 3. Render Ops Managers Table (with TL Teams count)
-    const sortedOps = Object.values(opsMap).sort((a, b) => b.mtd - a.mtd);
+    // 3. Render Ops Managers Table (ONLY True DB Ops Managers)
+    const sortedOps = Object.values(opsMap).filter(o => o.name !== 'Unassigned Ops').sort((a, b) => b.mtd - a.mtd);
     let opsMtdTotal = 0, opsFtdTotal = 0;
     const opsRows = sortedOps.map((op, i) => {
         opsMtdTotal += op.mtd;
         opsFtdTotal += op.ftd;
-        const target = getRoleTarget('OPS', op.name);
+        const target = op.target || getRoleTarget('OPS', op.name);
         const teamCount = op.teams.size;
+        const modeSub = `Direct: ${fmtInrInt(op.modeMap['D P2P'] || 0)} | P2P: ${fmtInrInt(op.modeMap['P2P'] || 0)}`;
+        const compSub = `DV: ${fmtInrInt(op.compMap['Digital Verse'] || 0)} | WK: ${fmtInrInt(op.compMap['World of Crypto'] || 0)}`;
+
         return `<tr>
             <td style="color:var(--text-muted);">${i + 1}</td>
-            <td><strong>${op.name}</strong></td>
+            <td>
+                <strong>${op.name}</strong>
+                <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${modeSub} &bull; ${compSub}</div>
+            </td>
             <td>${teamCount > 0 ? `${teamCount} Teams` : '-'}</td>
             <td style="font-weight:700;">${fmtInr(op.mtd)}</td>
             <td>${fmtInr(op.ftd)}</td>
@@ -306,8 +449,10 @@ async function load() {
         </tr>`;
     }).join('');
 
-    document.getElementById('opsTableBody').innerHTML = opsRows || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:18px;">No Ops records.</td></tr>';
-    document.getElementById('opsTableFoot').innerHTML = `<tr>
+    const opsBody = document.getElementById('opsTableBody');
+    const opsFoot = document.getElementById('opsTableFoot');
+    if (opsBody) opsBody.innerHTML = opsRows || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:18px;">No Ops records.</td></tr>';
+    if (opsFoot) opsFoot.innerHTML = `<tr>
         <td colspan="3">Grand Total</td>
         <td>${fmtInr(opsMtdTotal)}</td>
         <td>${fmtInr(opsFtdTotal)}</td>
@@ -321,7 +466,8 @@ async function load() {
         <td style="font-weight:700; color:var(--accent);">${fmtInr(data.inr)}</td>
         <td>${data.count}</td>
     </tr>`).join('');
-    document.getElementById('modeTableBody').innerHTML = modeRows;
+    const modeBody = document.getElementById('modeTableBody');
+    if (modeBody) modeBody.innerHTML = modeRows || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:18px;">No transaction records found.</td></tr>';
 
     // 5. Render Company Bifurcation
     const compRows = Object.entries(compMap).map(([comp, data]) => `<tr>
@@ -330,7 +476,8 @@ async function load() {
         <td style="font-weight:700; color:var(--accent);">${fmtInr(data.inr)}</td>
         <td>${data.count}</td>
     </tr>`).join('');
-    document.getElementById('companyTableBody').innerHTML = compRows;
+    const compBody = document.getElementById('companyTableBody');
+    if (compBody) compBody.innerHTML = compRows || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:18px;">No transaction records found.</td></tr>';
 
     window.currentReportData = { sortedAgents, sortedTLs, sortedOps, modeMap, compMap, selMonth, selFtd };
 }
@@ -352,35 +499,45 @@ if (exportExcelBtn) {
         const wb = XLSX.utils.book_new();
 
         // Sheet 1: Agents Report
-        const wsAgents = XLSX.utils.json_to_sheet(sortedAgents.map((a, i) => ({
-            'Rank': i + 1,
-            'Emp Code': getAgentEcode(a.name),
-            'Agent Name': a.name,
-            'MTD / Filter Sales (INR)': a.mtd,
-            'FTD Sales (INR)': a.ftd
-        })));
-        XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Performance');
+        if (sortedAgents) {
+            const wsAgents = XLSX.utils.json_to_sheet(sortedAgents.map((a, i) => ({
+                'Rank': i + 1,
+                'Emp Code': getAgentEcode(a.name),
+                'Agent Name': a.name,
+                'MTD / Filter Sales (INR)': a.mtd,
+                'FTD Sales (INR)': a.ftd
+            })));
+            XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Performance');
+        }
 
         // Sheet 2: Team Leaders Report
-        const wsTLs = XLSX.utils.json_to_sheet(sortedTLs.map((t, i) => ({
-            'Rank': i + 1,
-            'TL Name': t.name,
-            'MTD / Filter Sales (INR)': t.mtd,
-            'FTD Sales (INR)': t.ftd,
-            'Monthly Target': getRoleTarget('TL', t.name)
-        })));
-        XLSX.utils.book_append_sheet(wb, wsTLs, 'Team Leaders');
+        if (sortedTLs) {
+            const wsTLs = XLSX.utils.json_to_sheet(sortedTLs.map((t, i) => ({
+                'Rank': i + 1,
+                'TL Name': t.name,
+                'MTD / Filter Sales (INR)': t.mtd,
+                'FTD Sales (INR)': t.ftd,
+                'Monthly Target': t.target || getRoleTarget('TL', t.name)
+            })));
+            XLSX.utils.book_append_sheet(wb, wsTLs, 'Team Leaders');
+        }
 
         // Sheet 3: Ops Managers Report
-        const wsOps = XLSX.utils.json_to_sheet(sortedOps.map((o, i) => ({
-            'Rank': i + 1,
-            'Ops Manager': o.name,
-            'TL Teams Count': o.teams.size,
-            'MTD / Filter Sales (INR)': o.mtd,
-            'FTD Sales (INR)': o.ftd,
-            'Monthly Target': getRoleTarget('OPS', o.name)
-        })));
-        XLSX.utils.book_append_sheet(wb, wsOps, 'Ops Managers');
+        if (sortedOps) {
+            const wsOps = XLSX.utils.json_to_sheet(sortedOps.map((o, i) => ({
+                'Rank': i + 1,
+                'Ops Manager': o.name,
+                'TL Teams Count': o.teams.size,
+                'MTD / Filter Sales (INR)': o.mtd,
+                'FTD Sales (INR)': o.ftd,
+                'Direct P2P Sales': o.modeMap['D P2P'] || 0,
+                'P2P Sales': o.modeMap['P2P'] || 0,
+                'Digital Verse Sales': o.compMap['Digital Verse'] || 0,
+                'World of Crypto Sales': o.compMap['World of Crypto'] || 0,
+                'Monthly Target': o.target || getRoleTarget('OPS', o.name)
+            })));
+            XLSX.utils.book_append_sheet(wb, wsOps, 'Ops Managers');
+        }
 
         // Sheet 4: Payment Mode Bifurcation
         const wsMode = XLSX.utils.json_to_sheet(Object.entries(modeMap).map(([mode, data]) => ({

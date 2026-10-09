@@ -687,13 +687,21 @@ tfoot td {
 
 /* Segmented Tabs Control for Tables */
 .section-tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 16px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 20px;
+    background: #090c12;
+    border: 1px solid var(--line);
+    padding: 4px;
+    border-radius: 6px;
     overflow-x: auto;
-    width: 100%;
+    max-width: 100%;
+}
+
+[data-theme="light"] .section-tabs {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
 }
 
 .tab-btn {
@@ -701,12 +709,18 @@ tfoot td {
     border: 1px solid transparent;
     color: var(--text-muted);
     padding: 6px 14px;
+    height: 32px;
     font-size: 12px;
     font-weight: 600;
     border-radius: 4px;
     cursor: pointer;
-    transition: 0.12s;
+    transition: all 0.15s ease;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+    outline: none;
 }
 
 .tab-btn:hover {
@@ -715,15 +729,17 @@ tfoot td {
 }
 
 .tab-btn.active {
-    color: var(--accent);
-    background: #0f141d;
-    border-color: var(--line2);
+    color: var(--accent) !important;
+    background: #141d2b !important;
+    border-color: rgba(184, 255, 61, 0.3) !important;
+    font-weight: 700;
 }
 
 [data-theme="light"] .tab-btn.active {
-    color: var(--accent);
-    background: #ecfdf5;
-    border-color: #a7f3d0;
+    color: #059669 !important;
+    background: #ffffff !important;
+    border-color: #a7f3d0 !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
 /* Forms */
