@@ -20,26 +20,25 @@ let dbAgents = [];
 let dbClients = [];
 
 async function initEntryData() {
+    let apiSucceeded = false;
     try {
         const [agRes, clRes] = await Promise.all([
-            api('agents', {}).catch(() => ({ agents: [] })),
-            api('clients', {}).catch(() => ({ rows: [] }))
+            api('agents', {}),
+            api('clients', {})
         ]);
-        if (agRes.agents && agRes.agents.length) {
-            dbAgents = agRes.agents;
-            localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
-        } else {
-            dbAgents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
-        }
-        if (clRes.rows && clRes.rows.length) {
-            dbClients = clRes.rows;
-            localStorage.setItem('pp_clients', JSON.stringify(dbClients));
-        } else {
-            dbClients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
-        }
+        dbAgents = agRes.agents || agRes.rows || [];
+        dbClients = clRes.rows || [];
+        apiSucceeded = true;
     } catch(e) {
+        console.warn('API fetch warning in entry, reading local storage:', e);
         dbAgents = JSON.parse(localStorage.getItem('pp_agents') || '[]');
         dbClients = JSON.parse(localStorage.getItem('pp_clients') || '[]');
+    }
+
+    if (apiSucceeded) {
+        localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
+        localStorage.setItem('pp_mappings', JSON.stringify(dbAgents));
+        localStorage.setItem('pp_clients', JSON.stringify(dbClients));
     }
 }
 initEntryData();

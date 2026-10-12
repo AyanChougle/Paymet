@@ -7,6 +7,16 @@ const exportExcelBtn = document.getElementById('exportExcelBtn');
 // Set default FTD date to today
 ftdDate.value = new Date().toISOString().slice(0, 10);
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInrInt = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const fmtUsdt = (num) => Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -84,6 +94,7 @@ async function load() {
     let dbAgents = [];
     let lastEntry = null;
 
+    let apiSucceeded = false;
     try {
         const [dashRes, agentRes] = await Promise.all([
             api('dashboard', {}),
@@ -94,6 +105,7 @@ async function load() {
         dbOps = agentRes.ops_managers || [];
         dbTls = agentRes.team_leaders || [];
         dbAgents = agentRes.agents || [];
+        apiSucceeded = true;
     } catch (e) {
         console.warn('API fetch warning, reading local storage:', e);
         payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
@@ -103,15 +115,14 @@ async function load() {
         lastEntry = payments.length ? payments[payments.length - 1] : null;
     }
 
-    if ((!payments || payments.length === 0) && localStorage.getItem('pp_payments')) {
-        payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
-        if (payments.length && !lastEntry) lastEntry = payments[payments.length - 1];
+    if (apiSucceeded) {
+        // Authoritative Database Sync
+        localStorage.setItem('pp_payments', JSON.stringify(payments));
+        localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
+        localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
+        localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
+        localStorage.setItem('pp_mappings', JSON.stringify(dbAgents));
     }
-
-    // Cache database lists locally for fallback
-    if (dbOps.length) localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
-    if (dbTls.length) localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
-    if (dbAgents.length) localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
 
     // Last Entry Audit Display
     const lastEntryBadge = document.getElementById('lastEntryBadge');

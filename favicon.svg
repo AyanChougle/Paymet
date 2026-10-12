@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#161e2a"/>
+      <stop offset="100%" stop-color="#07090e"/>
+    </linearGradient>
+    <linearGradient id="limeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#cbfd5c"/>
+      <stop offset="100%" stop-color="#b8ff3d"/>
+    </linearGradient>
+    <linearGradient id="emeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Container Base -->
+  <rect x="2" y="2" width="60" height="60" rx="16" ry="16" fill="url(#bgGrad)" stroke="#222d3d" stroke-width="2"/>
+
+  <!-- Vertical Stem -->
+  <rect x="18" y="14" width="10" height="36" rx="4" fill="url(#limeGrad)"/>
+
+  <!-- Upper Loop -->
+  <path d="M28 14 L38 14 C44.627 14 50 19.373 50 26 C50 32.627 44.627 38 38 38 L28 38 Z" fill="url(#limeGrad)"/>
+  <!-- Inner Loop Cutout -->
+  <path d="M28 22 L37 22 C39.209 22 41 23.791 41 26 C41 28.209 39.209 30 37 30 L28 30 Z" fill="#0c1017"/>
+
+  <!-- Dynamic Fintech Accent -->
+  <circle cx="34" cy="26" r="3" fill="#b8ff3d"/>
+  <path d="M37 37 L46 46 C47 47 47 48.5 45.5 49.5 L42.5 49.5 C41.5 49.5 40.5 49 39.8 48.2 L33 40 Z" fill="url(#emeraldGrad)"/>
+</svg>

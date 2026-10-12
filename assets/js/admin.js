@@ -9,6 +9,16 @@ const targetList = document.getElementById('targetList');
 const targetMsg = document.getElementById('targetMsg');
 const exportBackupBtn = document.getElementById('exportBackupBtn');
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInrInt = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const fmtUsdt = (num) => Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -365,55 +375,62 @@ importBtn.onclick = function() {
 };
 
 // ==========================================
-// MASTER EXPORTER (ALL MODULES IN 1 EXCEL)
+// MASTER BACKUP GENERATOR (ALL MODULES IN 1 EXCEL)
 // ==========================================
+async function generateAndDownloadBackup(prefix = 'Hostinger_Master_DB_Backup') {
+    const [dash, agRes, clRes, accRes] = await Promise.all([
+        api('dashboard', {}).catch(() => ({ rawPayments: [] })),
+        api('agents', {}).catch(() => ({ agents: [], ops_managers: [], team_leaders: [] })),
+        api('clients', {}).catch(() => ({ rows: [] })),
+        api('accounts', {}).catch(() => ({ rows: [] }))
+    ]);
+
+    const wb = XLSX.utils.book_new();
+
+    const payments = dash.rawPayments || [];
+    const agents = agRes.agents || [];
+    const opsManagers = agRes.ops_managers || [];
+    const teamLeaders = agRes.team_leaders || [];
+    const clients = clRes.rows || [];
+    const accounts = accRes.rows || [];
+
+    // Sheet 1: Payments
+    const wsPayments = XLSX.utils.json_to_sheet(payments);
+    XLSX.utils.book_append_sheet(wb, wsPayments, 'Payments (Live DB)');
+
+    // Sheet 2: Agents
+    const wsAgents = XLSX.utils.json_to_sheet(agents);
+    XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Directory');
+
+    // Sheet 3: Ops Managers
+    const wsOps = XLSX.utils.json_to_sheet(opsManagers);
+    XLSX.utils.book_append_sheet(wb, wsOps, 'Ops Managers');
+
+    // Sheet 4: Team Leaders
+    const wsTls = XLSX.utils.json_to_sheet(teamLeaders);
+    XLSX.utils.book_append_sheet(wb, wsTls, 'Team Leaders');
+
+    // Sheet 5: Clients KYC
+    const wsClients = XLSX.utils.json_to_sheet(clients);
+    XLSX.utils.book_append_sheet(wb, wsClients, 'Clients KYC Directory');
+
+    // Sheet 6: Accounts Ledger
+    const wsAccounts = XLSX.utils.json_to_sheet(accounts);
+    XLSX.utils.book_append_sheet(wb, wsAccounts, 'Accounts Handover');
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `${prefix}_${timestamp}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    return filename;
+}
+
 if (exportBackupBtn) {
     exportBackupBtn.onclick = async function() {
         exportBackupBtn.textContent = 'Generating Database Backup...';
         exportBackupBtn.disabled = true;
 
         try {
-            const [dash, agRes, clRes, accRes] = await Promise.all([
-                api('dashboard', {}).catch(() => ({ rawPayments: [] })),
-                api('agents', {}).catch(() => ({ agents: [], ops_managers: [], team_leaders: [] })),
-                api('clients', {}).catch(() => ({ rows: [] })),
-                api('accounts', {}).catch(() => ({ rows: [] }))
-            ]);
-
-            const wb = XLSX.utils.book_new();
-
-            const payments = dash.rawPayments || [];
-            const agents = agRes.agents || [];
-            const opsManagers = agRes.ops_managers || [];
-            const teamLeaders = agRes.team_leaders || [];
-            const clients = clRes.rows || [];
-            const accounts = accRes.rows || [];
-
-            // Sheet 1: Payments
-            const wsPayments = XLSX.utils.json_to_sheet(payments);
-            XLSX.utils.book_append_sheet(wb, wsPayments, 'Payments (Live DB)');
-
-            // Sheet 2: Agents
-            const wsAgents = XLSX.utils.json_to_sheet(agents);
-            XLSX.utils.book_append_sheet(wb, wsAgents, 'Agents Directory');
-
-            // Sheet 3: Ops Managers
-            const wsOps = XLSX.utils.json_to_sheet(opsManagers);
-            XLSX.utils.book_append_sheet(wb, wsOps, 'Ops Managers');
-
-            // Sheet 4: Team Leaders
-            const wsTls = XLSX.utils.json_to_sheet(teamLeaders);
-            XLSX.utils.book_append_sheet(wb, wsTls, 'Team Leaders');
-
-            // Sheet 5: Clients KYC
-            const wsClients = XLSX.utils.json_to_sheet(clients);
-            XLSX.utils.book_append_sheet(wb, wsClients, 'Clients KYC Directory');
-
-            // Sheet 6: Accounts Ledger
-            const wsAccounts = XLSX.utils.json_to_sheet(accounts);
-            XLSX.utils.book_append_sheet(wb, wsAccounts, 'Accounts Handover');
-
-            XLSX.writeFile(wb, `Hostinger_Master_DB_Backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            await generateAndDownloadBackup('Hostinger_Master_DB_Backup');
         } catch(err) {
             alert('Backup Error: ' + err.message);
         } finally {
@@ -423,19 +440,78 @@ if (exportBackupBtn) {
     };
 }
 
-// Clear Data
-clearAllBtn.onclick = async function() {
-    if (confirm('Are you sure you want to wipe all transactions in the live Hostinger MySQL database? (Directory members will be preserved). This cannot be undone.')) {
+// Complete System Wipe with Pre-Wipe Backup Download & Confirmation Dialog
+if (clearAllBtn) {
+    clearAllBtn.onclick = async function() {
+        const confirmed = confirm(
+            "⚠️ ATTENTION: COMPLETE SYSTEM & DATABASE WIPE\n\n" +
+            "This action will permanently wipe ALL data across the entire platform, including:\n" +
+            "• All Payment Transactions & History\n" +
+            "• All Accounts Handover Ledger entries\n" +
+            "• All Registered Clients & KYC Records\n" +
+            "• All Agents, Team Leaders & Ops Managers\n" +
+            "• All Non-Admin Users\n" +
+            "• All offline browser storage backups & caches\n\n" +
+            "A full database backup spreadsheet (.xlsx) will be AUTOMATICALLY generated and downloaded to your computer BEFORE erasing anything.\n\n" +
+            "Are you sure you want to proceed?"
+        );
+
+        if (!confirmed) return;
+
+        clearAllBtn.disabled = true;
+        const originalText = clearAllBtn.textContent;
+        clearAllBtn.textContent = 'Downloading Safety Backup...';
+
         try {
-            await api('wipe_database_records', { scope: 'all' });
-            localStorage.setItem('pp_payments', JSON.stringify([]));
-            localStorage.setItem('pp_accounts', JSON.stringify([]));
-            alert('Live database transactions and accounts ledger wiped successfully.');
-            await load();
-        } catch(e) {
-            alert('Error resetting database: ' + e.message);
+            // 1. Generate & drop the safety backup file before erasing anything
+            const backupFilename = await generateAndDownloadBackup('SAFETY_BACKUP_BEFORE_WIPE');
+
+            // Brief pause to allow the browser download handshake to initiate
+            await new Promise(r => setTimeout(r, 600));
+
+            clearAllBtn.textContent = 'Wiping Database & Caches...';
+
+            // 2. Erase all records from MySQL database
+            const res = await api('wipe_database_records', { scope: 'all' });
+            if (!res.success) {
+                throw new Error(res.message || 'Server failed to wipe database records');
+            }
+
+            // 3. Purge all browser storage caches & offline backup copies
+            const keysToPurge = [
+                'pp_payments',
+                'pp_accounts',
+                'pp_clients',
+                'pp_agents',
+                'pp_mappings',
+                'pp_ops_managers',
+                'pp_team_leaders',
+                'pp_targets'
+            ];
+            keysToPurge.forEach(k => {
+                localStorage.removeItem(k);
+                sessionStorage.removeItem(k);
+            });
+
+            alert(
+                "✅ ALL SYSTEM DATA WIPED SUCCESSFULLY!\n\n" +
+                "1. Safety backup spreadsheet was downloaded to your computer:\n   " + backupFilename + "\n\n" +
+                "2. Live MySQL database tables and local backup caches have been wiped clean.\n" +
+                "3. Your active Admin session remains secure and logged in."
+            );
+
+            try {
+                await load();
+            } catch(refreshErr) {
+                console.warn('Dashboard UI refresh warning:', refreshErr);
+            }
+        } catch(err) {
+            alert('Wipe Operation Error: ' + err.message);
+        } finally {
+            clearAllBtn.disabled = false;
+            clearAllBtn.textContent = originalText;
         }
-    }
-};
+    };
+}
 
 load().catch(e => console.error(e));

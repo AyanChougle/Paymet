@@ -9,6 +9,16 @@ const exportHierarchyBtn = document.getElementById('exportHierarchyBtn');
 const exportAgentsBtn = document.getElementById('exportAgentsBtn');
 const agentSearch = document.getElementById('agentSearch');
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInrInt = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
@@ -183,43 +193,38 @@ async function loadData() {
     let dbOps = [];
     let dbTls = [];
     let dbAgents = [];
+    let apiSucceeded = false;
 
     try {
         const [dashRes, agRes] = await Promise.all([
-            api('dashboard', {}).catch(e => { console.warn('Dashboard fetch warning:', e); return {}; }),
-            api('agents', {}).catch(e => { console.warn('Agents fetch warning:', e); return {}; })
+            api('dashboard', {}),
+            api('agents', {})
         ]);
         payments = dashRes.rawPayments || dashRes.rows || [];
         dbAgents = agRes.agents || agRes.rows || [];
         dbOps = agRes.ops_managers || [];
         dbTls = agRes.team_leaders || [];
+        apiSucceeded = true;
     } catch(err) {
-        console.warn('Network / API error in loadData:', err);
+        console.warn('Network / API error in loadData, falling back to local cache:', err);
     }
 
-    if (payments.length) {
+    if (apiSucceeded) {
+        // Authoritative Database Sync
         cachedPayments = payments;
+        cachedOpsManagers = dbOps;
+        cachedTeamLeaders = dbTls;
+
         localStorage.setItem('pp_payments', JSON.stringify(payments));
+        localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
+        localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
+        localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
+        localStorage.setItem('pp_mappings', JSON.stringify(dbAgents));
     } else {
         cachedPayments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
-    }
-
-    if (dbOps.length) {
-        cachedOpsManagers = dbOps;
-        localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
-    } else {
         cachedOpsManagers = getOpsManagers();
-    }
-
-    if (dbTls.length) {
-        cachedTeamLeaders = dbTls;
-        localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
-    } else {
         cachedTeamLeaders = getTeamLeaders();
-    }
-
-    if (dbAgents.length) {
-        localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
+        dbAgents = getMappings();
     }
 
     cachedTargets = getTargets();
@@ -239,7 +244,7 @@ async function loadData() {
             ops_manager: resolveOpsName(a.ops_manager || ''),
             tl: (a.tl || a.team_leader || '').trim()
         }));
-    } else {
+    } else if (!apiSucceeded) {
         mappings = getMappings();
         if (mappings.length === 0 && cachedPayments.length > 0) {
             const known = new Set();

@@ -858,16 +858,90 @@ if ($action === 'update_target_node') {
 
 // 15. SAFE PRODUCTION DATA RESET (REQUIRES ADMIN ROLE ONLY)
 if ($action === 'wipe_database_records') {
-    require_role(['ADMIN']);
+    $me = require_role(['ADMIN']);
 
     $scope = $data['scope'] ?? 'all';
+
+    // 1. AUTOMATIC SERVER-SIDE BACKUP BEFORE WIPING
+    $serverBackupFile = null;
+    try {
+        $backupDir = __DIR__ . '/backups';
+        if (!is_dir($backupDir)) {
+            @mkdir($backupDir, 0755, true);
+            @file_put_contents($backupDir . '/.htaccess', "Order Deny,Allow\nDeny from all\n");
+        }
+
+        $tables = ['pp_payments', 'pp_accounts', 'pp_clients', 'pp_agents', 'pp_ops_managers', 'pp_team_leaders'];
+        $backupPayload = [
+            'created_at' => date('Y-m-d H:i:s'),
+            'created_by' => $me['name'] ?? $me['email'] ?? 'Admin',
+            'scope' => $scope,
+            'tables' => []
+        ];
+
+        foreach ($tables as $t) {
+            try {
+                $st = $pdo->query("SELECT * FROM `$t`");
+                $backupPayload['tables'][$t] = $st->fetchAll();
+            } catch (Throwable $e) {
+                $backupPayload['tables'][$t] = [];
+            }
+        }
+
+        $serverBackupFile = 'backup_' . date('Y-m-d_His') . '.json';
+        file_put_contents($backupDir . '/' . $serverBackupFile, json_encode($backupPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    } catch (Throwable $bErr) {
+        error_log("Pre-wipe server backup error: " . $bErr->getMessage());
+    }
+
+    // Disable foreign key constraints temporarily for clean wipe
+    try { $pdo->exec("SET FOREIGN_KEY_CHECKS = 0"); } catch (Throwable $e) {}
+
     if ($scope === 'all' || $scope === 'payments') {
-        $pdo->exec("TRUNCATE TABLE pp_payments");
+        try {
+            $pdo->exec("TRUNCATE TABLE pp_payments");
+        } catch (Throwable $t) {
+            $pdo->exec("DELETE FROM pp_payments");
+            try { $pdo->exec("ALTER TABLE pp_payments AUTO_INCREMENT = 1"); } catch (Throwable $t2) {}
+        }
     }
+
     if ($scope === 'all' || $scope === 'accounts') {
-        try { $pdo->exec("TRUNCATE TABLE pp_accounts"); } catch(Exception $e) {}
+        try {
+            $pdo->exec("TRUNCATE TABLE pp_accounts");
+        } catch (Throwable $t) {
+            try {
+                $pdo->exec("DELETE FROM pp_accounts");
+                $pdo->exec("ALTER TABLE pp_accounts AUTO_INCREMENT = 1");
+            } catch (Throwable $t2) {}
+        }
     }
-    out(['success' => true]);
+
+    if ($scope === 'all') {
+        $otherTables = ['pp_clients', 'pp_agents', 'pp_ops_managers', 'pp_team_leaders'];
+        foreach ($otherTables as $tbl) {
+            try {
+                $pdo->exec("TRUNCATE TABLE `$tbl`");
+            } catch (Throwable $t) {
+                try {
+                    $pdo->exec("DELETE FROM `$tbl`");
+                    $pdo->exec("ALTER TABLE `$tbl` AUTO_INCREMENT = 1");
+                } catch (Throwable $t2) {}
+            }
+        }
+
+        // Delete all non-admin users so the current logged-in administrator is not locked out
+        $myId = (int)($me['id'] ?? 0);
+        if ($myId > 0) {
+            try {
+                $pdo->prepare("DELETE FROM pp_users WHERE id != ?")->execute([$myId]);
+            } catch (Throwable $t) {}
+        }
+    }
+
+    try { $pdo->exec("SET FOREIGN_KEY_CHECKS = 1"); } catch (Throwable $e) {}
+
+    out(['success' => true, 'server_backup_file' => $serverBackupFile]);
 }
 
 err('Unknown action: ' . htmlspecialchars($action), 404);
