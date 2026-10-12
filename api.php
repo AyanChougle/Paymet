@@ -98,6 +98,35 @@ if (!$pdo) {
     err('Database Connection Failed. Please contact administrator.', 500);
 }
 
+// Auto-align pp_users table columns with live system requirements
+try {
+    $uCols = $pdo->query("DESCRIBE `pp_users`")->fetchAll(PDO::FETCH_COLUMN);
+    $uColLower = array_map('strtolower', $uCols ?: []);
+
+    if (!in_array('name', $uColLower) && in_array('full_name', $uColLower)) {
+        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `name` VARCHAR(150) DEFAULT NULL");
+        @$pdo->exec("UPDATE `pp_users` SET `name` = `full_name` WHERE `name` IS NULL");
+    }
+    if (!in_array('email', $uColLower)) {
+        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `email` VARCHAR(150) DEFAULT NULL");
+        @$pdo->exec("UPDATE `pp_users` SET `email` = `full_name` WHERE `full_name` LIKE '%@%' AND (`email` IS NULL OR `email` = '')");
+        @$pdo->exec("UPDATE `pp_users` SET `email` = CONCAT(`username`, '@portal.com') WHERE `email` IS NULL OR `email` = ''");
+    }
+    if (!in_array('password', $uColLower) && in_array('password_hash', $uColLower)) {
+        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `password` VARCHAR(255) DEFAULT NULL");
+        @$pdo->exec("UPDATE `pp_users` SET `password` = `password_hash` WHERE `password` IS NULL");
+    }
+    if (!in_array('password_hash', $uColLower) && in_array('password', $uColLower)) {
+        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `password_hash` VARCHAR(255) DEFAULT NULL");
+        @$pdo->exec("UPDATE `pp_users` SET `password_hash` = `password` WHERE `password_hash` IS NULL");
+    }
+    if (!in_array('is_active', $uColLower)) {
+        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `is_active` TINYINT(1) DEFAULT 1");
+    }
+    @$pdo->exec("ALTER TABLE `pp_users` MODIFY COLUMN `role` VARCHAR(50) NOT NULL DEFAULT 'AGENT'");
+    @$pdo->exec("UPDATE `pp_users` SET `role` = 'AGENT' WHERE `role` IS NULL OR TRIM(`role`) = '' OR `role` = 'ENTRY_USER'");
+} catch (Throwable $e) {}
+
 // ========================================================
 // AUTHENTICATION & ACCESS CONTROL HELPERS (RBAC)
 // ========================================================
@@ -183,25 +212,30 @@ if ($action === 'login') {
         err('Email/Username and Password are required.');
     }
 
-    // Check pp_users table dynamically
     $u = null;
+    $userPrefix = explode('@', $input)[0];
+
     try {
-        $stmt = $pdo->prepare("SELECT 
-            id, 
-            COALESCE(NULLIF(name, ''), NULLIF(full_name, ''), username) AS name, 
-            COALESCE(NULLIF(email, ''), username) AS email, 
-            COALESCE(NULLIF(password, ''), password_hash) AS pwd,
-            role,
-            COALESCE(active, is_active, 1) AS is_active
-        FROM pp_users 
-        WHERE (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(full_name) = LOWER(?)) 
-        LIMIT 1");
-        $stmt->execute([$input, $input, $input, $input]);
-        $u = $stmt->fetch();
-    } catch (Exception $e) {
-        $stmt = $pdo->prepare("SELECT id, name, email, password AS pwd, role, 1 AS is_active FROM pp_users WHERE (LOWER(email) = LOWER(?) OR LOWER(name) = LOWER(?)) LIMIT 1");
-        $stmt->execute([$input, $input]);
-        $u = $stmt->fetch();
+        $rawUsers = $pdo->query("SELECT * FROM pp_users")->fetchAll();
+        foreach ($rawUsers as $row) {
+            $rUser = strtolower(trim((string)($row['username'] ?? '')));
+            $rEmail = strtolower(trim((string)($row['email'] ?? '')));
+            $rFull = strtolower(trim((string)($row['full_name'] ?? $row['name'] ?? '')));
+
+            $inLower = strtolower($input);
+            $prefLower = strtolower($userPrefix);
+
+            if (
+                ($rUser && ($rUser === $inLower || $rUser === $prefLower)) ||
+                ($rEmail && ($rEmail === $inLower || $rEmail === $prefLower)) ||
+                ($rFull && ($rFull === $inLower || $rFull === $prefLower))
+            ) {
+                $u = $row;
+                break;
+            }
+        }
+    } catch (Throwable $e) {
+        error_log("Login query error: " . $e->getMessage());
     }
 
     // Bootstrap initial admin ONLY if pp_users is completely empty (zero users)
@@ -209,60 +243,73 @@ if ($action === 'login') {
         $totalUsers = 0;
         try {
             $totalUsers = (int)$pdo->query("SELECT COUNT(*) FROM pp_users")->fetchColumn();
-        } catch (Exception $e) {}
+        } catch (Throwable $e) {}
 
         if ($totalUsers === 0 && strtolower($input) === 'admin@portal.com') {
             $hashed = password_hash($pass, PASSWORD_DEFAULT);
             try {
-                $pdo->prepare("INSERT INTO pp_users (name, email, password, role, active) VALUES (?, ?, ?, 'ADMIN', 1)")
-                    ->execute(['System Admin', 'admin@portal.com', $hashed]);
+                $pdo->prepare("INSERT INTO pp_users (username, full_name, email, password_hash, role, is_active) VALUES ('admin', 'System Admin', 'admin@portal.com', ?, 'ADMIN', 1)")
+                    ->execute([$hashed]);
                 $u = [
                     'id' => (int)$pdo->lastInsertId(),
-                    'name' => 'System Admin',
+                    'username' => 'admin',
+                    'full_name' => 'System Admin',
                     'email' => 'admin@portal.com',
-                    'pwd' => $hashed,
+                    'password_hash' => $hashed,
                     'role' => 'ADMIN',
                     'is_active' => 1
                 ];
-            } catch (Exception $e) {}
+            } catch (Throwable $e) {}
         }
     }
 
     if ($u) {
-        if (!empty($u['is_active']) && (int)$u['is_active'] === 0) {
+        $isActive = $u['is_active'] ?? $u['active'] ?? 1;
+        if ((int)$isActive === 0) {
             record_failed_login();
             err('Account is deactivated. Please contact an administrator.');
         }
 
-        $storedPwd = $u['pwd'] ?? '';
+        $storedPwd = $u['password_hash'] ?? $u['password'] ?? $u['pwd'] ?? '';
         $valid = false;
 
-        if (password_verify($pass, $storedPwd)) {
-            $valid = true;
-        } elseif ($pass === $storedPwd && !empty($storedPwd)) {
-            // Transparently upgrade legacy plaintext password to secure bcrypt hash
-            $valid = true;
-            try {
-                $newHash = password_hash($pass, PASSWORD_DEFAULT);
-                $pdo->prepare("UPDATE pp_users SET password = ? WHERE id = ?")->execute([$newHash, $u['id']]);
-            } catch (Exception $e) {}
+        if (!empty($storedPwd)) {
+            if (password_verify($pass, $storedPwd)) {
+                $valid = true;
+            } elseif ($pass === $storedPwd) {
+                // Transparently upgrade legacy plaintext password to secure bcrypt hash
+                $valid = true;
+                try {
+                    $newHash = password_hash($pass, PASSWORD_DEFAULT);
+                    $pdo->prepare("UPDATE pp_users SET password_hash = ? WHERE id = ?")->execute([$newHash, $u['id']]);
+                } catch (Throwable $e) {}
+            }
         }
 
         if ($valid) {
             clear_login_rate_limit();
-            session_regenerate_id(true); // Prevent session fixation
+            session_regenerate_id(true);
 
-            unset($u['pwd'], $u['is_active']);
-            $u['id'] = (int)$u['id'];
-            $u['role'] = strtoupper($u['role'] ?? 'ENTRY_USER');
+            $cleanRole = strtoupper(trim((string)($u['role'] ?? 'AGENT')));
+            if (!$cleanRole || $cleanRole === 'ENTRY_USER') {
+                $cleanRole = 'AGENT';
+            }
 
-            $_SESSION['pp_user'] = $u;
-            out(['user' => $u]);
+            $userSession = [
+                'id' => (int)$u['id'],
+                'name' => ucwords(trim($u['full_name'] ?? $u['name'] ?? $u['username'] ?? 'User')),
+                'email' => strtolower(trim($u['email'] ?? ($u['full_name'] && strpos($u['full_name'], '@') !== false ? $u['full_name'] : ($u['username'] . '@portal.com')))),
+                'username' => strtolower(trim($u['username'] ?? '')),
+                'role' => $cleanRole
+            ];
+
+            $_SESSION['pp_user'] = $userSession;
+            out(['user' => $userSession]);
         }
     }
 
     record_failed_login();
-    err('Invalid email or password.');
+    err('Invalid email/username or password.');
 }
 
 // 2. LOGOUT (AUTHENTICATED)
@@ -385,6 +432,11 @@ if ($action === 'clients') {
 if ($action === 'admin') {
     require_role(['ADMIN']);
 
+    // Auto-repair any blank roles in pp_users table so they default to AGENT
+    try {
+        $pdo->exec("UPDATE pp_users SET role = 'AGENT' WHERE role IS NULL OR TRIM(role) = '' OR role = 'ENTRY_USER'");
+    } catch(Throwable $e) {}
+
     $users = [];
     try {
         $rawUsers = $pdo->query("SELECT * FROM pp_users ORDER BY id ASC")->fetchAll();
@@ -396,12 +448,17 @@ if ($action === 'admin') {
             $email = $eMail ?: ($fName && strpos($fName, '@') !== false ? $fName : $uName);
             $name = $fName ?: ($uName ?: 'User');
 
+            $rawRole = strtoupper(trim((string)($r['role'] ?? '')));
+            if (!$rawRole || $rawRole === 'ENTRY_USER') {
+                $rawRole = 'AGENT';
+            }
+
             $users[] = [
                 'id' => (int)$r['id'],
                 'name' => ucwords($name),
                 'email' => strtolower($email),
                 'username' => strtolower($uName ?: explode('@', $email)[0]),
-                'role' => strtoupper($r['role'] ?? 'ENTRY_USER'),
+                'role' => $rawRole,
                 'created_at' => $r['created_at'] ?? null
             ];
         }
@@ -478,8 +535,6 @@ if ($action === 'create_user') {
     $name = clean_str($data['name'] ?? $data['full_name'] ?? '', 100);
     $email = strtolower(clean_str($data['email'] ?? '', 150));
     $password = (string)($data['password'] ?? '');
-    $role = strtoupper(clean_str($data['role'] ?? 'ENTRY_USER', 30));
-
     if (empty($name) || empty($email)) {
         err('Full Name and Email Address are required.');
     }
@@ -490,9 +545,21 @@ if ($action === 'create_user') {
         err('Password must be at least 6 characters long.');
     }
 
-    if (!in_array($role, ['ADMIN', 'OPS_MANAGER', 'ENTRY_USER'], true)) {
-        $role = 'ENTRY_USER';
+    $rawRole = strtoupper(clean_str($data['role'] ?? 'AGENT', 30));
+    if ($rawRole === 'ENTRY_USER' || empty($rawRole)) {
+        $rawRole = 'AGENT';
     }
+
+    $validRoles = ['ADMIN', 'OPS_MANAGER', 'TEAM_LEADER', 'AGENT', 'ACCOUNTS'];
+    if (!in_array($rawRole, $validRoles, true)) {
+        $rawRole = 'AGENT';
+    }
+    $role = $rawRole;
+
+    // Ensure role column in pp_users supports VARCHAR so it never rejects valid roles
+    try {
+        $pdo->exec("ALTER TABLE `pp_users` MODIFY COLUMN `role` VARCHAR(50) NOT NULL DEFAULT 'AGENT'");
+    } catch(Throwable $e) {}
 
     $passHash = password_hash($password, PASSWORD_DEFAULT);
     $username = explode('@', $email)[0];
@@ -506,29 +573,90 @@ if ($action === 'create_user') {
         }
     } catch(Exception $e) {}
 
+    // Inspect pp_users schema to dynamically construct compatible INSERT query
+    $desc = [];
+    try {
+        $desc = $pdo->query("DESCRIBE pp_users")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {}
+
+    $fieldsToInsert = [];
+    $valuesToInsert = [];
+
+    if (!empty($desc)) {
+        foreach ($desc as $col) {
+            $field = $col['Field'];
+            $fieldLower = strtolower($field);
+            $type = strtolower($col['Type'] ?? '');
+
+            if ($fieldLower === 'id') continue; // auto increment
+
+            if (in_array($fieldLower, ['username', 'user_name', 'uname'])) {
+                $fieldsToInsert[] = "`$field`";
+                $valuesToInsert[] = $username;
+            } elseif (in_array($fieldLower, ['name', 'full_name', 'fullname', 'display_name'])) {
+                $fieldsToInsert[] = "`$field`";
+                $valuesToInsert[] = $name;
+            } elseif ($fieldLower === 'email') {
+                $fieldsToInsert[] = "`$field`";
+                $valuesToInsert[] = $email;
+            } elseif (in_array($fieldLower, ['password', 'password_hash', 'pwd', 'pass'])) {
+                $fieldsToInsert[] = "`$field`";
+                $valuesToInsert[] = $passHash;
+            } elseif ($fieldLower === 'role') {
+                $fieldsToInsert[] = "`$field`";
+                // If enum in MySQL uses lowercase values
+                if (strpos($type, "'entry_user'") !== false || strpos($type, "'admin'") !== false) {
+                    $valuesToInsert[] = strtolower($role);
+                } else {
+                    $valuesToInsert[] = $role;
+                }
+            } elseif (in_array($fieldLower, ['active', 'is_active', 'status'])) {
+                $fieldsToInsert[] = "`$field`";
+                $valuesToInsert[] = 1;
+            } elseif ($fieldLower === 'created_at') {
+                $fieldsToInsert[] = "`$field`";
+                $valuesToInsert[] = date('Y-m-d H:i:s');
+            }
+        }
+    }
+
     $created = false;
     $lastErr = '';
 
-    // Insert user with prepared statement
-    try {
-        $stmt = $pdo->prepare("INSERT INTO pp_users (name, email, password, role, active) VALUES (?, ?, ?, ?, 1)");
-        $stmt->execute([$name, $email, $passHash, $role]);
-        $created = true;
-    } catch (Exception $e) {
+    if (!empty($fieldsToInsert)) {
+        $placeholders = array_fill(0, count($fieldsToInsert), '?');
+        $sql = "INSERT INTO pp_users (" . implode(', ', $fieldsToInsert) . ") VALUES (" . implode(', ', $placeholders) . ")";
         try {
-            $stmt = $pdo->prepare("INSERT INTO pp_users (username, full_name, email, role, password_hash, is_active) VALUES (?, ?, ?, ?, ?, 1)");
-            $stmt->execute([$username, $name, $email, $role, $passHash]);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($valuesToInsert);
             $created = true;
-        } catch (Exception $e2) {
-            $lastErr = $e2->getMessage();
+        } catch (Throwable $e) {
+            $lastErr = $e->getMessage();
+        }
+    }
+
+    // Fallback if dynamic discovery yielded no fields or failed
+    if (!$created) {
+        try {
+            $stmt = $pdo->prepare("INSERT INTO pp_users (name, email, password, role, active) VALUES (?, ?, ?, ?, 1)");
+            $stmt->execute([$name, $email, $passHash, $role]);
+            $created = true;
+        } catch (Throwable $e1) {
+            try {
+                $stmt = $pdo->prepare("INSERT INTO pp_users (username, full_name, email, role, password_hash, is_active) VALUES (?, ?, ?, ?, ?, 1)");
+                $stmt->execute([$username, $name, $email, $role, $passHash]);
+                $created = true;
+            } catch (Throwable $e2) {
+                $lastErr = $e2->getMessage() ?: $e1->getMessage();
+            }
         }
     }
 
     if ($created) {
-        out(['id' => (int)$pdo->lastInsertId()]);
+        out(['id' => (int)$pdo->lastInsertId(), 'success' => true]);
     } else {
         error_log("Create User Error: " . $lastErr);
-        err('Failed to create user.');
+        err('Failed to create user: ' . $lastErr);
     }
 }
 
@@ -784,9 +912,9 @@ if ($action === 'remove_client_node') {
     out(['success' => true]);
 }
 
-// 13. ACCOUNTS LEDGER MANAGEMENT (REQUIRES ADMIN OR OPS_MANAGER)
+// 13. ACCOUNTS LEDGER MANAGEMENT (REQUIRES ADMIN ONLY)
 if ($action === 'accounts') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN']);
 
     try {
         $pdo->exec("CREATE TABLE IF NOT EXISTS `pp_accounts` (
@@ -799,14 +927,49 @@ if ($action === 'accounts') {
           `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    } catch(Exception $e) {}
+    } catch(Throwable $e) {}
 
-    $entries = $pdo->query("SELECT id, date, type, amount, remarks, handled_by, created_at FROM pp_accounts ORDER BY date DESC, id DESC")->fetchAll();
+    // Auto-migrate any missing columns on existing Hostinger table
+    try {
+        $existingCols = $pdo->query("DESCRIBE `pp_accounts`")->fetchAll(PDO::FETCH_COLUMN);
+        $colLower = array_map('strtolower', $existingCols ?: []);
+        if (!in_array('type', $colLower)) {
+            @$pdo->exec("ALTER TABLE `pp_accounts` ADD COLUMN `type` varchar(50) DEFAULT 'CASH_HANDOVER'");
+        }
+        if (!in_array('remarks', $colLower) && !in_array('description', $colLower)) {
+            @$pdo->exec("ALTER TABLE `pp_accounts` ADD COLUMN `remarks` text DEFAULT NULL");
+        }
+        if (!in_array('handled_by', $colLower)) {
+            @$pdo->exec("ALTER TABLE `pp_accounts` ADD COLUMN `handled_by` varchar(255) DEFAULT NULL");
+        }
+        if (!in_array('created_at', $colLower)) {
+            @$pdo->exec("ALTER TABLE `pp_accounts` ADD COLUMN `created_at` datetime DEFAULT CURRENT_TIMESTAMP");
+        }
+    } catch (Throwable $e) {}
+
+    $entries = [];
+    try {
+        $raw = $pdo->query("SELECT * FROM pp_accounts ORDER BY id DESC")->fetchAll();
+        foreach ($raw as $r) {
+            $entries[] = [
+                'id' => (int)($r['id'] ?? 0),
+                'date' => $r['date'] ?? date('Y-m-d'),
+                'type' => $r['type'] ?? 'CASH_HANDOVER',
+                'amount' => floatval($r['amount'] ?? 0),
+                'remarks' => $r['remarks'] ?? $r['description'] ?? '',
+                'handled_by' => $r['handled_by'] ?? '',
+                'created_at' => $r['created_at'] ?? ''
+            ];
+        }
+    } catch(Throwable $e) {
+        error_log("Accounts fetch error: " . $e->getMessage());
+    }
+
     out(['rows' => $entries]);
 }
 
 if ($action === 'upsert_account_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN']);
 
     $date = clean_str($data['date'] ?? date('Y-m-d'), 20);
     $amount = abs(floatval($data['amount'] ?? 0));
@@ -821,7 +984,7 @@ if ($action === 'upsert_account_node') {
 }
 
 if ($action === 'remove_account_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN']);
 
     $id = (int)($data['id'] ?? 0);
     if ($id > 0) {

@@ -126,12 +126,13 @@ async function load() {
         const isCurrent = cUser && (cUser.id === u.id || (u.email && cUser.email === u.email));
         const displayName = (u.name && u.name !== u.email) ? u.name : (u.name || u.username || 'System User');
         const displayEmail = (u.email && u.email !== 'undefined') ? u.email : (u.username || '-');
+        const displayRole = (u.role && u.role.trim()) ? u.role : 'AGENT';
         const deleteBtn = isCurrent ? `<span style="font-size:11px; color:var(--text-muted);">Current User</span>` :
             `<button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteUser(${u.id}, '${displayName.replace(/'/g, "\\'")}')">Delete</button>`;
         return `<tr>
             <td><strong>${escapeHtml(displayName)}</strong></td>
             <td>${escapeHtml(displayEmail)}</td>
-            <td><span style="font-weight:700; color:var(--accent); font-size:11.5px;">${escapeHtml(u.role)}</span></td>
+            <td><span style="font-weight:700; color:var(--accent); font-size:11.5px;">${escapeHtml(displayRole)}</span></td>
             <td style="text-align:right;">${deleteBtn}</td>
         </tr>`;
     }).join('');
@@ -149,15 +150,18 @@ window.deleteUser = async function(userId, name) {
 
 userForm.onsubmit = async e => {
     e.preventDefault();
-    userMsg.textContent = '';
+    userMsg.textContent = 'Creating user...';
+    userMsg.style.color = 'var(--text-muted, #718096)';
     try {
         await api('create_user', Object.fromEntries(new FormData(userForm)));
+        userMsg.style.color = '#38a169';
         userMsg.textContent = 'User created successfully!';
         userForm.reset();
-        load();
-        setTimeout(() => userMsg.textContent = '', 3000);
+        await load();
+        setTimeout(() => { userMsg.textContent = ''; }, 4000);
     } catch (x) {
-        userMsg.textContent = x.message;
+        userMsg.style.color = '#e53e3e';
+        userMsg.textContent = x.message || 'Failed to create user.';
     }
 };
 
@@ -493,11 +497,16 @@ if (clearAllBtn) {
                 sessionStorage.removeItem(k);
             });
 
+            const serverMsg = res.server_backup_file 
+                ? `\n2. Server-side backup snapshot archived on Hostinger:\n   backups/${res.server_backup_file}\n`
+                : '';
+
             alert(
                 "✅ ALL SYSTEM DATA WIPED SUCCESSFULLY!\n\n" +
-                "1. Safety backup spreadsheet was downloaded to your computer:\n   " + backupFilename + "\n\n" +
-                "2. Live MySQL database tables and local backup caches have been wiped clean.\n" +
-                "3. Your active Admin session remains secure and logged in."
+                "1. Safety backup spreadsheet (.xlsx) was downloaded to your computer:\n   " + backupFilename + "\n" +
+                serverMsg + "\n" +
+                "3. Live MySQL database tables and browser storage caches were wiped clean.\n" +
+                "4. Your active Admin session remains secure and logged in."
             );
 
             try {

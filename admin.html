@@ -118,9 +118,11 @@
                 <label>Password<input name="password" type="password" placeholder="Enter password" autocomplete="new-password" required></label>
                 <label>Role
                     <select name="role">
-                        <option value="ADMIN">Admin</option>
-                        <option value="OPS_MANAGER">Ops Manager</option>
-                        <option value="ENTRY_USER">Entry User</option>
+                        <option value="ADMIN">Admin (Full Control)</option>
+                        <option value="OPS_MANAGER">Ops Manager (Dashboards & Targets)</option>
+                        <option value="TEAM_LEADER">Team Leader (Teams & Payment Entry)</option>
+                        <option value="AGENT">Agent (Payment Entry & Clients)</option>
+                        <option value="ACCOUNTS">Accounts (Ledger & Cash Handover)</option>
                     </select>
                 </label>
                 <div class="wide" style="display:flex; align-items:center; gap:12px;">
