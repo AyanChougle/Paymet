@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
 
 :root {
     --bg: #07090e;
@@ -9,8 +9,8 @@
     --line2: #222d3d;
     --border: #161e2a;
     --text: #edf2f7;
-    --text-muted: #7d8b9d;
-    --text-dim: #4c5767;
+    --text-muted: #8b99ac;
+    --text-dim: #5c6878;
     --accent: #b8ff3d;
     --accent-hover: #c8ff65;
     --accent-btn-text: #07090e;
@@ -19,11 +19,8 @@
     --table-header-bg: #0d121b;
     --table-footer-bg: #0d121b;
     --table-footer-text: #edf2f7;
-    --font-serif: 'Cormorant Garamond', Garamond, 'Times New Roman', serif;
-    --font-brand: 'Manrope', -apple-system, sans-serif;
-    --font-product: 'DM Sans', -apple-system, sans-serif;
-    --font-sans: 'Cormorant Garamond', Garamond, 'Times New Roman', serif;
-    --font-heading: 'Cormorant Garamond', Garamond, 'Times New Roman', serif;
+    --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-heading: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
 }
 
@@ -61,30 +58,13 @@ html, body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 15px;
-    font-weight: 500;
-    font-feature-settings: "lnum" 1, "tnum" 1;
-    line-height: 1.5;
+    font-size: 14.5px;
+    font-weight: 400;
+    line-height: 1.55;
     min-height: 100vh;
-}
-
-/* Brand Name Exception */
-.brand, .brand *, .login-box h1, .brand-text {
-    font-family: var(--font-brand) !important;
-}
-
-/* Product & Entity Names Exception */
-.product-name,
-.company-name,
-select[name="received_in"],
-#companyFilter,
-#companyTableBody td:first-child,
-#companyTableBody td:first-child strong,
-#kpiCompany,
-#kpiCompanySub,
-.badge-company,
-#reportsTable td:nth-child(10) {
-    font-family: var(--font-product) !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
 
 /* Sidebar - Clean & Sharp */
@@ -108,10 +88,14 @@ select[name="received_in"],
 }
 
 .brand {
-    font-family: var(--font-brand);
+    font-family: var(--font-heading);
     font-weight: 800;
-    font-size: 15px;
+    font-size: 16px;
     letter-spacing: -0.2px;
+    color: var(--text);
+    padding: 0 10px 18px;
+    border-bottom: 1px solid var(--line);
+}
     color: var(--text);
     padding: 0 10px 18px;
     border-bottom: 1px solid var(--line);
@@ -235,8 +219,8 @@ select[name="received_in"],
 h1 {
     font-family: var(--font-heading);
     font-size: 26px;
-    font-weight: 600;
-    letter-spacing: -0.2px;
+    font-weight: 800;
+    letter-spacing: -0.4px;
     color: var(--text);
 }
 
@@ -271,24 +255,24 @@ h1 {
 .kpi-card small, .stat small {
     display: block;
     color: var(--text-muted);
-    font-size: 10.5px;
-    font-weight: 600;
+    font-size: 11.5px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1.2px;
+    letter-spacing: 1px;
     margin-bottom: 6px;
 }
 
 .kpi-card strong, .stat strong {
     display: block;
     font-family: var(--font-heading);
-    font-size: 22px;
-    font-weight: 600;
+    font-size: 24px;
+    font-weight: 800;
     color: var(--text);
-    letter-spacing: -0.2px;
+    letter-spacing: -0.3px;
 }
 
 .kpi-card .kpi-sub {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-dim);
     margin-top: 4px;
 }
@@ -305,7 +289,7 @@ h1 {
 }
 
 .filters label {
-    font-size: 11.5px;
+    font-size: 12.5px;
     font-weight: 600;
     color: var(--text-muted);
     display: flex;
@@ -319,9 +303,9 @@ h1 {
     background: #090c12;
     border: 1px solid var(--line2);
     color: var(--text);
-    padding: 7px 11px;
-    border-radius: 4px;
-    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 5px;
+    font-size: 13px;
     font-family: inherit;
     outline: none;
     min-width: 130px;
@@ -345,14 +329,14 @@ button, .btn {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    height: 34px;
-    padding: 0 14px;
+    height: 36px;
+    padding: 0 16px;
     background: var(--accent);
     color: var(--accent-btn-text);
     border: 1px solid var(--accent);
-    border-radius: 4px;
+    border-radius: 5px;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 13px;
     font-family: inherit;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -627,7 +611,7 @@ button.danger:hover, .btn.danger:hover {
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12.5px;
+    font-size: 13.5px;
     text-align: left;
     white-space: nowrap;
 }
@@ -638,11 +622,11 @@ thead {
 }
 
 th {
-    padding: 10px 12px;
-    font-size: 10px;
+    padding: 12px 14px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.8px;
     color: var(--text-muted);
 }
 
@@ -651,9 +635,10 @@ th {
 }
 
 td {
-    padding: 10px 12px;
+    padding: 11px 14px;
     border-bottom: 1px solid #121822;
     color: var(--text);
+    font-size: 13.5px;
 }
 
 [data-theme="light"] td {
@@ -787,9 +772,9 @@ tfoot td {
 .form-grid label {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
     color: var(--text-muted);
-    font-size: 11.5px;
+    font-size: 13px;
     font-weight: 600;
     min-width: 0;
 }
@@ -800,10 +785,10 @@ input, select, textarea {
     background: #05070a;
     border: 1px solid var(--line2);
     color: var(--text);
-    padding: 8px 11px;
-    border-radius: 4px;
+    padding: 10px 13px;
+    border-radius: 6px;
     font-family: inherit;
-    font-size: 12.5px;
+    font-size: 13.5px;
     outline: none;
     transition: 0.12s;
 }

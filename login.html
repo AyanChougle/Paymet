@@ -8,8 +8,8 @@
     <link rel="alternate icon" href="favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/css/app.css?v=11">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/app.css?v=12">
     <style>
         #db-warning-banner {
             display: none !important;
@@ -22,67 +22,82 @@
             height: 100vh;
             background: var(--bg);
             font-family: var(--font-sans);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         .login-box {
             background: var(--surface);
-            padding: 40px;
-            border-radius: 12px;
+            padding: 44px 38px;
+            border-radius: 14px;
             border: 1px solid var(--line);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            box-shadow: 0 16px 40px rgba(0,0,0,0.3);
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
         }
         .login-box h1 {
-            font-family: var(--font-brand) !important;
-            font-size: 24px;
+            font-family: var(--font-heading) !important;
+            font-size: 28px;
             font-weight: 800;
             margin-bottom: 8px;
-            letter-spacing: -0.2px;
+            letter-spacing: -0.4px;
+            color: var(--text);
         }
         .login-box p {
             font-family: var(--font-sans);
             font-size: 15px;
             color: var(--text-muted);
-            margin-bottom: 24px;
+            margin-bottom: 26px;
         }
         .login-box form {
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 18px;
         }
         .login-box label {
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            font-size: 13px;
-            font-weight: 500;
+            gap: 7px;
+            font-size: 13.5px;
+            font-weight: 600;
+            color: var(--text);
         }
         .login-box input {
-            padding: 10px 12px;
+            padding: 12px 14px;
             border: 1px solid var(--line2);
-            border-radius: 6px;
+            border-radius: 8px;
             background: var(--bg);
             color: var(--text);
             font-family: inherit;
+            font-size: 14.5px;
+            outline: none;
+            transition: border-color 0.15s ease;
+        }
+        .login-box input:focus {
+            border-color: var(--accent);
         }
         .login-box button {
             margin-top: 8px;
-            padding: 12px;
+            padding: 13px;
             background: var(--accent);
-            color: #fff;
+            color: var(--accent-btn-text);
             border: none;
-            border-radius: 6px;
-            font-weight: 600;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14.5px;
+            font-weight: 700;
             cursor: pointer;
+            transition: all 0.15s ease;
         }
         .login-box button:hover {
-            opacity: 0.9;
+            background: var(--accent-hover);
         }
         #loginMsg {
             color: var(--danger);
-            font-size: 13px;
+            font-size: 13.5px;
             text-align: center;
             margin-top: 12px;
+            min-height: 20px;
+        }
             min-height: 20px;
         }
     </style>
