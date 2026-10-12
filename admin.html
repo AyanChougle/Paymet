@@ -118,11 +118,9 @@
                 <label>Password<input name="password" type="password" placeholder="Enter password" autocomplete="new-password" required></label>
                 <label>Role
                     <select name="role">
-                        <option value="ADMIN">Admin (Full Control)</option>
-                        <option value="OPS_MANAGER">Ops Manager (Dashboards & Targets)</option>
-                        <option value="TEAM_LEADER">Team Leader (Teams & Payment Entry)</option>
-                        <option value="AGENT">Agent (Payment Entry & Clients)</option>
-                        <option value="ACCOUNTS">Accounts (Ledger & Cash Handover)</option>
+                        <option value="ENTRY_USER">Entry User (Payment Entry, Reports, Agents, Clients)</option>
+                        <option value="OPS_MANAGER">Ops Manager (Dashboard, Revenue, Reports, Agents, Clients)</option>
+                        <option value="ADMIN">Admin (Full Access & Settings)</option>
                     </select>
                 </label>
                 <div class="wide" style="display:flex; align-items:center; gap:12px;">
@@ -154,8 +152,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=5"></script>
-    <script src="assets/js/auth.js"></script>
-    <script src="assets/js/admin.js?v=5"></script>
+    <script src="assets/js/api.js?v=10"></script>
+    <script src="assets/js/auth.js?v=10"></script>
+    <script src="assets/js/admin.js?v=10"></script>
 </body>
 </html>

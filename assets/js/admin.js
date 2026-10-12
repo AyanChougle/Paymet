@@ -125,8 +125,9 @@ async function load() {
         const cUser = getCurrentUser();
         const isCurrent = cUser && (cUser.id === u.id || (u.email && cUser.email === u.email));
         const displayName = (u.name && u.name !== u.email) ? u.name : (u.name || u.username || 'System User');
-        const displayEmail = (u.email && u.email !== 'undefined') ? u.email : (u.username || '-');
-        const displayRole = (u.role && u.role.trim()) ? u.role : 'AGENT';
+        let r = (u.role && u.role.trim()) ? u.role.toUpperCase() : 'ENTRY_USER';
+        if (r === 'AGENT' || r === 'TEAM_LEADER') r = 'ENTRY_USER';
+        const displayRole = r;
         const deleteBtn = isCurrent ? `<span style="font-size:11px; color:var(--text-muted);">Current User</span>` :
             `<button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteUser(${u.id}, '${displayName.replace(/'/g, "\\'")}')">Delete</button>`;
         return `<tr>
