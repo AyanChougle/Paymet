@@ -26,12 +26,12 @@ async function render() {
     // 1. Render Registered Clients
     const clients = await getClientsData();
     list.innerHTML = clients.map((c, idx) => `<tr>
-        <td><strong>${c.client_name || ''}</strong></td>
-        <td>${c.client_number || '-'}</td>
-        <td>${c.email_id || '-'}</td>
-        <td><code>${c.pan_no || '-'}</code></td>
-        <td><code>${c.aadhar_no || '-'}</code></td>
-        <td>${c.state || '-'}</td>
+        <td><strong>${escapeHtml(c.client_name || '')}</strong></td>
+        <td>${escapeHtml(c.client_number || '-')}</td>
+        <td>${escapeHtml(c.email_id || '-')}</td>
+        <td><code>${escapeHtml(c.pan_no || '-')}</code></td>
+        <td><code>${escapeHtml(c.aadhar_no || '-')}</code></td>
+        <td>${escapeHtml(c.state || '-')}</td>
         <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteClient(${c.id || 0}, '${(c.client_number||'').replace(/'/g, "\\'")}', '${(c.client_name||'').replace(/'/g, "\\'")}')">Delete</button></td>
     </tr>`).join('') || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:20px;">No registered clients found.</td></tr>';
 
@@ -78,10 +78,10 @@ async function render() {
     const groupArray = Object.values(groups).sort((a, b) => b.total - a.total);
 
     paidBody.innerHTML = groupArray.map(g => `<tr>
-        <td><strong>${g.agent}</strong></td>
-        <td>${g.client}</td>
-        <td>${g.number}</td>
-        <td>${g.email}</td>
+        <td><strong>${escapeHtml(g.agent)}</strong></td>
+        <td>${escapeHtml(g.client)}</td>
+        <td>${escapeHtml(g.number)}</td>
+        <td>${escapeHtml(g.email)}</td>
         <td>${g.dv > 0 ? fmtInr(g.dv) : '-'}</td>
         <td>${g.wk > 0 ? fmtInr(g.wk) : '-'}</td>
         <td style="font-weight:700; color:var(--accent);">${fmtInr(g.total)}</td>

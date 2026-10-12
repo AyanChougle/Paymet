@@ -52,9 +52,9 @@ async function render() {
     document.getElementById('balance').textContent = fmtInr(balance);
 
     list.innerHTML = ledger.map(l => `<tr>
-        <td>${l.date || ''}</td>
+        <td>${escapeHtml(l.date || '')}</td>
         <td style="color:var(--danger); font-weight:700;">${fmtInr(l.amount)}</td>
-        <td>${l.remarks || '-'}</td>
+        <td>${escapeHtml(l.remarks || '-')}</td>
         <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteEntry(${l.id || 0}, '${(l.date||'').replace(/'/g, "\\'")}', ${parseFloat(l.amount)||0})">Delete</button></td>
     </tr>`).join('') || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No handover entries recorded.</td></tr>';
 }

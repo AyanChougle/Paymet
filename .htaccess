@@ -1,0 +1,37 @@
+# ========================================================
+# Hostinger Apache / LiteSpeed Security Configuration
+# ========================================================
+
+# 1. Disable Directory Indexing / File Listing
+Options -Indexes -MultiViews
+
+# 2. Block Access to Sensitive System & Data Files
+<FilesMatch "(^\.|\.(sql|env|ini|log|md|sh|bak|swp|json|lock|example\.php))$">
+    Require all denied
+</FilesMatch>
+
+# Explicitly block access to SQL and documentation directories
+RedirectMatch 403 ^/(sql|backend)/.*\.sql$
+RedirectMatch 403 ^/README\.md$
+RedirectMatch 403 ^/\.git
+
+# 3. HTTP Security Headers
+<IfModule mod_headers.c>
+    # Prevent MIME-type sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # Prevent Clickjacking by restricting framing to same origin
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    # Enable browser Cross-Site Scripting filtering
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Restrict referrer information passed to third parties
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Restrict browser APIs not used by this portal
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>
+
+# 4. Disable Server Signature in Error Pages
+ServerSignature Off

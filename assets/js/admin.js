@@ -119,9 +119,9 @@ async function load() {
         const deleteBtn = isCurrent ? `<span style="font-size:11px; color:var(--text-muted);">Current User</span>` :
             `<button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteUser(${u.id}, '${displayName.replace(/'/g, "\\'")}')">Delete</button>`;
         return `<tr>
-            <td><strong>${displayName}</strong></td>
-            <td>${displayEmail}</td>
-            <td><span style="font-weight:700; color:var(--accent); font-size:11.5px;">${u.role}</span></td>
+            <td><strong>${escapeHtml(displayName)}</strong></td>
+            <td>${escapeHtml(displayEmail)}</td>
+            <td><span style="font-weight:700; color:var(--accent); font-size:11.5px;">${escapeHtml(u.role)}</span></td>
             <td style="text-align:right;">${deleteBtn}</td>
         </tr>`;
     }).join('');

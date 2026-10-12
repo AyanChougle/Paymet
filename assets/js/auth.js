@@ -55,15 +55,18 @@
                     <label style="font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); font-weight:700;">
                         Logged in as
                     </label>
-                    <div style="font-size:13px; font-weight:600; color:var(--text); margin-top:2px;">${user.name}</div>
-                    <div style="font-size:11px; color:var(--text-muted);">${user.email} &middot; <span style="color:var(--accent);">${user.role}</span></div>
+                    <div style="font-size:13px; font-weight:600; color:var(--text); margin-top:2px;">${escapeHtml(user.name)}</div>
+                    <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(user.email)} &middot; <span style="color:var(--accent);">${escapeHtml(user.role)}</span></div>
                 </div>
                 <button id="logoutBtn" class="ghost danger" style="padding:6px; font-size:11.5px; width:100%; border-radius:4px; text-align:center;">Log Out</button>
             `;
 
             sidebarFooter.insertBefore(wrap, sidebarFooter.firstChild);
 
-            document.getElementById('logoutBtn').onclick = () => {
+            document.getElementById('logoutBtn').onclick = async () => {
+                try {
+                    await api('logout', {});
+                } catch(e) {}
                 sessionStorage.removeItem('pp_user');
                 location.href = 'login.html';
             };

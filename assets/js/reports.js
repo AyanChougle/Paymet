@@ -108,29 +108,29 @@ function renderTable() {
     }
 
     tableBody.innerHTML = pageRows.map((r, i) => {
-        const ecode = r.ecode || getAgentEcode(r.agent_name);
-        const ops = r.ops_manager || getAgentOps(r.agent_name);
-        const enteredBy = r.created_by_name ? `<strong>${r.created_by_name}</strong>` : '<span style="color:var(--text-dim);">-</span>';
-        const entryTime = r.created_at ? `<span style="font-size:11px; color:var(--text-muted);">${r.created_at}</span>` : '-';
+        const ecode = escapeHtml(r.ecode || getAgentEcode(r.agent_name));
+        const ops = escapeHtml(r.ops_manager || getAgentOps(r.agent_name));
+        const enteredBy = r.created_by_name ? `<strong>${escapeHtml(r.created_by_name)}</strong>` : '<span style="color:var(--text-dim);">-</span>';
+        const entryTime = r.created_at ? `<span style="font-size:11px; color:var(--text-muted);">${escapeHtml(r.created_at)}</span>` : '-';
 
         return `<tr>
             <td style="color:var(--text-muted);">${startIdx + i + 1}</td>
-            <td>${r.payment_date || ''}</td>
+            <td>${escapeHtml(r.payment_date || '')}</td>
             <td style="color:var(--text-muted); font-family:var(--font-mono); font-size:12px;">${ecode}</td>
-            <td><strong>${r.agent_name || ''}</strong></td>
-            <td>${r.tl || '-'}</td>
+            <td><strong>${escapeHtml(r.agent_name || '')}</strong></td>
+            <td>${escapeHtml(r.tl || '-')}</td>
             <td>${ops}</td>
-            <td>${r.client_name || '-'}</td>
-            <td>${r.client_number || '-'}</td>
-            <td>${r.email_id || '-'}</td>
-            <td><span style="font-weight:600;">${r.payment_mode || 'P2P'}</span></td>
+            <td>${escapeHtml(r.client_name || '-')}</td>
+            <td>${escapeHtml(r.client_number || '-')}</td>
+            <td>${escapeHtml(r.email_id || '-')}</td>
+            <td><span style="font-weight:600;">${escapeHtml(r.payment_mode || 'P2P')}</span></td>
             <td>${fmtUsdt(r.usdt)}</td>
             <td style="font-weight:700; color:var(--accent);">${fmtInr(r.inr_amount)}</td>
-            <td>${r.ratio || '-'}</td>
-            <td style="font-family:var(--font-mono); font-size:11.5px;">${r.pan_no || '-'}</td>
-            <td style="font-family:var(--font-mono); font-size:11.5px;">${r.aadhar_no || '-'}</td>
-            <td>${r.state || '-'}</td>
-            <td>${r.received_in || '-'}</td>
+            <td>${escapeHtml(r.ratio || '-')}</td>
+            <td style="font-family:var(--font-mono); font-size:11.5px;">${escapeHtml(r.pan_no || '-')}</td>
+            <td style="font-family:var(--font-mono); font-size:11.5px;">${escapeHtml(r.aadhar_no || '-')}</td>
+            <td>${escapeHtml(r.state || '-')}</td>
+            <td>${escapeHtml(r.received_in || '-')}</td>
             <td>${enteredBy}</td>
             <td>${entryTime}</td>
         </tr>`;
