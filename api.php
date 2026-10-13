@@ -13,10 +13,12 @@ if (!empty($origin)) {
         header("Access-Control-Allow-Origin: $origin");
         header('Access-Control-Allow-Credentials: true');
     }
-} else {
-    // If no Origin header (same-origin request), set safe defaults
-    header('Access-Control-Allow-Origin: *');
 }
+// Same-origin requests carry no Origin header and need no CORS headers.
+if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
+header('Cache-Control: no-store');
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -51,12 +53,13 @@ if (session_status() === PHP_SESSION_NONE) {
 // ========================================================
 // DATABASE CONFIGURATION & SECURE CONNECTION
 // ========================================================
-$db_host = 'localhost';
-$db_user = 'u303154098_ZtY2h';
-$db_pass = 'PortalPass@2026';
-$db_name = 'u303154098_o3Qhw';
+$db_host = getenv('PP_DB_HOST') ?: 'localhost';
+$db_user = getenv('PP_DB_USER') ?: '';
+$db_pass = getenv('PP_DB_PASS') ?: '';
+$db_name = getenv('PP_DB_NAME') ?: '';
+$pp_allow_wipe = false;
 
-// Optional config override
+// Credentials live in config.php (git-ignored, see config.example.php) or PP_DB_* env vars.
 if (file_exists(__DIR__ . '/config.php')) {
     $cfg = include __DIR__ . '/config.php';
     if (is_array($cfg)) {
@@ -64,6 +67,7 @@ if (file_exists(__DIR__ . '/config.php')) {
         if (!empty($cfg['pass'])) $db_pass = $cfg['pass'];
         if (!empty($cfg['name'])) $db_name = $cfg['name'];
         if (!empty($cfg['host'])) $db_host = $cfg['host'];
+        $pp_allow_wipe = !empty($cfg['allow_wipe']);
     }
 }
 
@@ -80,7 +84,17 @@ function err($msg, $statusCode = 400) {
 
 $pdo = null;
 $lastError = '';
-foreach (['localhost', '127.0.0.1'] as $h) {
+if ($db_user === '' || $db_name === '') {
+    error_log('Payment Portal: database credentials are not configured (config.php missing).');
+    err('Server is not configured. Please contact administrator.', 500);
+}
+$hostsToTry = array_values(array_unique(array_filter([
+    $db_host,
+    'localhost',
+    '127.0.0.1'
+])));
+
+foreach ($hostsToTry as $h) {
     try {
         $pdo = new PDO("mysql:host=$h;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -146,39 +160,77 @@ function require_role(array $allowedRoles) {
     return $u;
 }
 
-// Rate Limiting on Login (Brute Force Protection)
-function check_login_rate_limit() {
+// Rate Limiting on Login: shared server-side store (cannot be bypassed by dropping the session cookie)
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_WINDOW_SEC = 900;
+const LOGIN_LOCK_SEC = 900;
+
+function login_keys(string $account): array {
     $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    $key = 'login_ratelimit_' . md5($ip);
+    return ['ip:' . hash('sha256', $ip), 'acct:' . hash('sha256', strtolower(trim($account)))];
+}
+
+function login_limiter_init(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS pp_login_attempts (
+        throttle_key VARCHAR(80) NOT NULL PRIMARY KEY,
+        fail_count INT NOT NULL DEFAULT 0,
+        first_attempt INT NOT NULL,
+        locked_until INT NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+function check_login_rate_limit(PDO $pdo, string $account) {
+    login_limiter_init($pdo);
     $now = time();
-    $data = $_SESSION[$key] ?? ['count' => 0, 'first_attempt' => $now, 'locked_until' => 0];
-
-    if ($data['locked_until'] > $now) {
-        $rem = $data['locked_until'] - $now;
-        err("Too many failed login attempts. Please wait $rem seconds before trying again.", 429);
-    }
-
-    if ($now - $data['first_attempt'] > 900) {
-        $_SESSION[$key] = ['count' => 0, 'first_attempt' => $now, 'locked_until' => 0];
+    foreach (login_keys($account) as $k) {
+        $st = $pdo->prepare("SELECT locked_until FROM pp_login_attempts WHERE throttle_key = ?");
+        $st->execute([$k]);
+        $lock = (int)$st->fetchColumn();
+        if ($lock > $now) {
+            err("Too many failed login attempts. Please wait " . ($lock - $now) . " seconds before trying again.", 429);
+        }
     }
 }
 
-function record_failed_login() {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    $key = 'login_ratelimit_' . md5($ip);
+function record_failed_login(PDO $pdo, string $account) {
+    login_limiter_init($pdo);
     $now = time();
-    $data = $_SESSION[$key] ?? ['count' => 0, 'first_attempt' => $now, 'locked_until' => 0];
-    $data['count']++;
-    if ($data['count'] >= 5) {
-        $data['locked_until'] = $now + 180; // 3 minute lock
+    foreach (login_keys($account) as $k) {
+        $st = $pdo->prepare("SELECT fail_count, first_attempt FROM pp_login_attempts WHERE throttle_key = ?");
+        $st->execute([$k]);
+        $row = $st->fetch();
+        if (!$row || $now - (int)$row['first_attempt'] > LOGIN_WINDOW_SEC) {
+            $count = 1; $first = $now;
+        } else {
+            $count = (int)$row['fail_count'] + 1; $first = (int)$row['first_attempt'];
+        }
+        $lock = $count >= LOGIN_MAX_FAILS ? $now + LOGIN_LOCK_SEC : 0;
+        $pdo->prepare("REPLACE INTO pp_login_attempts (throttle_key, fail_count, first_attempt, locked_until) VALUES (?, ?, ?, ?)")
+            ->execute([$k, $count, $first, $lock]);
     }
-    $_SESSION[$key] = $data;
 }
 
-function clear_login_rate_limit() {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    $key = 'login_ratelimit_' . md5($ip);
-    unset($_SESSION[$key]);
+function clear_login_rate_limit(PDO $pdo, string $account) {
+    // Only the account key is cleared; the IP key keeps counting so one IP cannot spray many accounts.
+    $k = login_keys($account)[1];
+    $pdo->prepare("DELETE FROM pp_login_attempts WHERE throttle_key = ?")->execute([$k]);
+}
+
+// PII handling: full PAN/Aadhaar only for roles that manage clients
+function can_view_pii(): bool {
+    $u = $_SESSION['pp_user'] ?? null;
+    return $u && in_array(strtoupper($u['role'] ?? ''), ['ADMIN', 'OPS_MANAGER'], true);
+}
+
+function mask_id($v) {
+    $v = (string)$v;
+    $n = strlen($v);
+    if ($n === 0) return '';
+    return str_repeat('*', max(0, $n - 4)) . substr($v, -min(4, $n));
+}
+
+function is_masked($v): bool {
+    return strpos((string)$v, '*') !== false;
 }
 
 // Input sanitizer helper
@@ -202,13 +254,12 @@ try {
 
 // 1. LOGIN (PUBLIC - RATE LIMITED & BRUTE-FORCE PROTECTED)
 if ($action === 'login') {
-    check_login_rate_limit();
-
     $input = clean_str($data['email'] ?? $data['username'] ?? '', 150);
+    check_login_rate_limit($pdo, $input);
     $pass = (string)($data['password'] ?? '');
 
     if (empty($input) || empty($pass)) {
-        record_failed_login();
+        record_failed_login($pdo, $input);
         err('Email/Username and Password are required.');
     }
 
@@ -238,56 +289,25 @@ if ($action === 'login') {
         error_log("Login query error: " . $e->getMessage());
     }
 
-    // Bootstrap initial admin ONLY if pp_users is completely empty (zero users)
-    if (!$u) {
-        $totalUsers = 0;
-        try {
-            $totalUsers = (int)$pdo->query("SELECT COUNT(*) FROM pp_users")->fetchColumn();
-        } catch (Throwable $e) {}
-
-        if ($totalUsers === 0 && strtolower($input) === 'admin@portal.com') {
-            $hashed = password_hash($pass, PASSWORD_DEFAULT);
-            try {
-                $pdo->prepare("INSERT INTO pp_users (username, full_name, email, password_hash, role, is_active) VALUES ('admin', 'System Admin', 'admin@portal.com', ?, 'ADMIN', 1)")
-                    ->execute([$hashed]);
-                $u = [
-                    'id' => (int)$pdo->lastInsertId(),
-                    'username' => 'admin',
-                    'full_name' => 'System Admin',
-                    'email' => 'admin@portal.com',
-                    'password_hash' => $hashed,
-                    'role' => 'ADMIN',
-                    'is_active' => 1
-                ];
-            } catch (Throwable $e) {}
-        }
-    }
-
     if ($u) {
         $isActive = $u['is_active'] ?? $u['active'] ?? 1;
         if ((int)$isActive === 0) {
-            record_failed_login();
+            record_failed_login($pdo, $input);
             err('Account is deactivated. Please contact an administrator.');
         }
 
-        $storedPwd = $u['password_hash'] ?? $u['password'] ?? $u['pwd'] ?? '';
-        $valid = false;
-
-        if (!empty($storedPwd)) {
-            if (password_verify($pass, $storedPwd)) {
-                $valid = true;
-            } elseif ($pass === $storedPwd) {
-                // Transparently upgrade legacy plaintext password to secure bcrypt hash
-                $valid = true;
-                try {
-                    $newHash = password_hash($pass, PASSWORD_DEFAULT);
-                    $pdo->prepare("UPDATE pp_users SET password_hash = ? WHERE id = ?")->execute([$newHash, $u['id']]);
-                } catch (Throwable $e) {}
-            }
+        // Only bcrypt/argon hashes are accepted. Legacy plaintext rows must be
+        // migrated first with tools/manage_users.php migrate-passwords.
+        $storedPwd = (string)($u['password_hash'] ?? $u['password'] ?? '');
+        $valid = $storedPwd !== '' && password_verify($pass, $storedPwd);
+        if ($valid && password_needs_rehash($storedPwd, PASSWORD_DEFAULT)) {
+            try {
+                $pdo->prepare("UPDATE pp_users SET password_hash = ? WHERE id = ?")->execute([password_hash($pass, PASSWORD_DEFAULT), $u['id']]);
+            } catch (Throwable $e) {}
         }
 
         if ($valid) {
-            clear_login_rate_limit();
+            clear_login_rate_limit($pdo, $input);
             session_regenerate_id(true);
 
             $cleanRole = strtoupper(trim((string)($u['role'] ?? 'AGENT')));
@@ -308,7 +328,7 @@ if ($action === 'login') {
         }
     }
 
-    record_failed_login();
+    record_failed_login($pdo, $input);
     err('Invalid email/username or password.');
 }
 
@@ -363,8 +383,8 @@ if ($action === 'dashboard' || $action === 'reports') {
             'divided_by' => $div,
             'inr_amount' => $inr,
             'ratio' => $r['ratio'] ?? '',
-            'pan_no' => $r['pan_no'] ?? '',
-            'aadhar_no' => $r['aadhar_no'] ?? '',
+            'pan_no' => can_view_pii() ? ($r['pan_no'] ?? '') : mask_id($r['pan_no'] ?? ''),
+            'aadhar_no' => can_view_pii() ? ($r['aadhar_no'] ?? '') : mask_id($r['aadhar_no'] ?? ''),
             'state' => $r['state'] ?? '',
             'received_in' => $r['received_in'] ?? $r['received_company'] ?? 'Digital Verse',
             'remarks' => $r['remarks'] ?? '',
@@ -425,6 +445,13 @@ if ($action === 'clients') {
     require_auth();
 
     $clients = $pdo->query("SELECT id, client_name, client_number, email_id, pan_no, aadhar_no, created_at FROM pp_clients ORDER BY id DESC")->fetchAll();
+    if (!can_view_pii()) {
+        foreach ($clients as &$c) {
+            $c['pan_no'] = mask_id($c['pan_no'] ?? '');
+            $c['aadhar_no'] = mask_id($c['aadhar_no'] ?? '');
+        }
+        unset($c);
+    }
     out(['rows' => $clients]);
 }
 
@@ -473,16 +500,38 @@ if ($action === 'create_payment') {
     $curUser = require_auth();
 
     $pDate = clean_str($data['payment_date'] ?? date('Y-m-d'), 20);
-    $agent = clean_str($data['agent_name'] ?? 'Unassigned Agent', 150);
-    $usdt = abs(floatval($data['usdt'] ?? 0));
-    $div = abs(floatval($data['divided_by'] ?? 88));
-    if ($div == 0) $div = 88;
-    $inr = abs(floatval($data['inr_amount'] ?? 0));
-    if ($inr <= 0 && $usdt > 0) $inr = round($usdt * $div, 2);
+    $dt = DateTime::createFromFormat('Y-m-d', $pDate);
+    if (!$dt || $dt->format('Y-m-d') !== $pDate) err('Invalid payment date.');
+    if ($pDate > date('Y-m-d', strtotime('+1 day'))) err('Payment date cannot be in the future.');
+
+    $agent = clean_str($data['agent_name'] ?? '', 150);
+    if ($agent === '') err('Agent name is required.');
+
+    foreach (['usdt', 'divided_by', 'inr_amount'] as $f) {
+        if (isset($data[$f]) && $data[$f] !== '' && (!is_numeric($data[$f]) || (float)$data[$f] < 0)) {
+            err("Invalid value for $f.");
+        }
+    }
+    $usdt = round((float)($data['usdt'] ?? 0), 2);
+    $div = round((float)($data['divided_by'] ?? 0), 2);
+    $inr = round((float)($data['inr_amount'] ?? 0), 2);
+    if ($usdt <= 0 && $inr <= 0) err('A positive USDT or INR amount is required.');
+    if ($usdt > 10000000 || $inr > 1000000000) err('Amount exceeds the allowed limit.');
+    if ($usdt > 0) {
+        if ($div <= 0) $div = 88;
+        $expected = round($usdt * $div, 2);
+        if ($inr <= 0) {
+            $inr = $expected;
+        } elseif (abs($inr - $expected) > max(1.0, $expected * 0.005)) {
+            // Client-supplied INR must agree with USDT x rate (0.5% / Rs 1 tolerance for rounding)
+            err('INR amount does not match USDT x rate. Please re-check the amounts.');
+        }
+    }
 
     // Creator is stamped from authenticated session
     $creator = $curUser['name'] ?? 'Staff';
     $mode = clean_str($data['payment_mode'] ?? 'P2P', 50);
+    if ($mode === '') $mode = 'P2P';
     $recIn = clean_str($data['received_in'] ?? $data['received_company'] ?? 'Digital Verse', 100);
 
     $ecode = clean_str($data['ecode'] ?? '', 50);
@@ -495,6 +544,18 @@ if ($action === 'create_payment') {
     $pan = strtoupper(clean_str($data['pan_no'] ?? '', 30));
     $aadhar = clean_str($data['aadhar_no'] ?? '', 30);
     $state = clean_str($data['state'] ?? '', 100);
+
+    if (is_masked($pan) || is_masked($aadhar)) {
+        // A masked value came back from the UI auto-fill; use the stored original instead.
+        $real = ['pan_no' => '', 'aadhar_no' => ''];
+        if ($cNum) {
+            $st = $pdo->prepare("SELECT pan_no, aadhar_no FROM pp_clients WHERE client_number = ? LIMIT 1");
+            $st->execute([$cNum]);
+            $real = $st->fetch() ?: $real;
+        }
+        if (is_masked($pan)) $pan = strtoupper((string)($real['pan_no'] ?? ''));
+        if (is_masked($aadhar)) $aadhar = (string)($real['aadhar_no'] ?? '');
+    }
 
     try {
         $stmt = $pdo->prepare("INSERT INTO pp_payments 
@@ -927,7 +988,7 @@ if ($action === 'accounts') {
           `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    } catch(Throwable $e) {}
+    } catch(Throwable $e) {}    
 
     // Auto-migrate any missing columns on existing Hostinger table
     try {
@@ -969,7 +1030,7 @@ if ($action === 'accounts') {
 }
 
 if ($action === 'upsert_account_node') {
-    require_role(['ADMIN']);
+    require_role(['ADMIN']);    
 
     $date = clean_str($data['date'] ?? date('Y-m-d'), 20);
     $amount = abs(floatval($data['amount'] ?? 0));
@@ -987,15 +1048,8 @@ if ($action === 'remove_account_node') {
     require_role(['ADMIN']);
 
     $id = (int)($data['id'] ?? 0);
-    if ($id > 0) {
-        $pdo->prepare("DELETE FROM pp_accounts WHERE id = ?")->execute([$id]);
-    } else {
-        $date = clean_str($data['date'] ?? '', 20);
-        $amount = abs(floatval($data['amount'] ?? 0));
-        if ($date && $amount > 0) {
-            $pdo->prepare("DELETE FROM pp_accounts WHERE date = ? AND amount = ? LIMIT 1")->execute([$date, $amount]);
-        }
-    }
+    if ($id <= 0) err('A ledger entry id is required to delete an entry.');
+    $pdo->prepare("DELETE FROM pp_accounts WHERE id = ?")->execute([$id]);
     out(['success' => true]);
 }
 
@@ -1019,11 +1073,27 @@ if ($action === 'update_target_node') {
     out(['success' => true]);
 }
 
-// 15. SAFE PRODUCTION DATA RESET (REQUIRES ADMIN ROLE ONLY)
+// 15. SAFE PRODUCTION DATA RESET (ADMIN ONLY, DISABLED BY DEFAULT)
 if ($action === 'wipe_database_records') {
     $me = require_role(['ADMIN']);
 
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') err('POST required.', 405);
+    if (empty($pp_allow_wipe)) err('Database wipe is disabled on this server (set allow_wipe in config.php to enable it temporarily).', 403);
+
     $scope = $data['scope'] ?? 'all';
+    if (!in_array($scope, ['all', 'payments', 'accounts'], true)) err('Invalid scope.');
+
+    if (($data['confirm'] ?? '') !== 'DELETE ' . strtoupper($scope)) {
+        err('Confirmation text missing or incorrect.');
+    }
+    // Re-authenticate: a hijacked session alone must not be able to wipe data
+    $st = $pdo->prepare("SELECT * FROM pp_users WHERE id = ?");
+    $st->execute([(int)$me['id']]);
+    $meRow = $st->fetch();
+    $storedPw = (string)($meRow['password_hash'] ?? $meRow['password'] ?? '');
+    if ($storedPw === '' || !password_verify((string)($data['password'] ?? ''), $storedPw)) {
+        err('Password confirmation failed.', 403);
+    }
 
     // 1. AUTOMATIC SERVER-SIDE BACKUP BEFORE WIPING
     $serverBackupFile = null;
@@ -1031,7 +1101,7 @@ if ($action === 'wipe_database_records') {
         $backupDir = __DIR__ . '/backups';
         if (!is_dir($backupDir)) {
             @mkdir($backupDir, 0755, true);
-            @file_put_contents($backupDir . '/.htaccess', "Order Deny,Allow\nDeny from all\n");
+            @file_put_contents($backupDir . '/.htaccess', "Order Deny,Allow\nDeny from all\n<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n");
         }
 
         $tables = ['pp_payments', 'pp_accounts', 'pp_clients', 'pp_agents', 'pp_ops_managers', 'pp_team_leaders'];
@@ -1057,40 +1127,25 @@ if ($action === 'wipe_database_records') {
         error_log("Pre-wipe server backup error: " . $bErr->getMessage());
     }
 
+    if (!$serverBackupFile || !is_file(__DIR__ . '/backups/' . $serverBackupFile) || filesize(__DIR__ . '/backups/' . $serverBackupFile) < 50) {
+        err('Pre-wipe backup failed; nothing was deleted.', 500);
+    }
+
     // Disable foreign key constraints temporarily for clean wipe
     try { $pdo->exec("SET FOREIGN_KEY_CHECKS = 0"); } catch (Throwable $e) {}
 
     if ($scope === 'all' || $scope === 'payments') {
-        try {
-            $pdo->exec("TRUNCATE TABLE pp_payments");
-        } catch (Throwable $t) {
-            $pdo->exec("DELETE FROM pp_payments");
-            try { $pdo->exec("ALTER TABLE pp_payments AUTO_INCREMENT = 1"); } catch (Throwable $t2) {}
-        }
+        $pdo->exec("DELETE FROM pp_payments");
     }
 
     if ($scope === 'all' || $scope === 'accounts') {
-        try {
-            $pdo->exec("TRUNCATE TABLE pp_accounts");
-        } catch (Throwable $t) {
-            try {
-                $pdo->exec("DELETE FROM pp_accounts");
-                $pdo->exec("ALTER TABLE pp_accounts AUTO_INCREMENT = 1");
-            } catch (Throwable $t2) {}
-        }
+        $pdo->exec("DELETE FROM pp_accounts");
     }
 
     if ($scope === 'all') {
         $otherTables = ['pp_clients', 'pp_agents', 'pp_ops_managers', 'pp_team_leaders'];
         foreach ($otherTables as $tbl) {
-            try {
-                $pdo->exec("TRUNCATE TABLE `$tbl`");
-            } catch (Throwable $t) {
-                try {
-                    $pdo->exec("DELETE FROM `$tbl`");
-                    $pdo->exec("ALTER TABLE `$tbl` AUTO_INCREMENT = 1");
-                } catch (Throwable $t2) {}
-            }
+            try { $pdo->exec("DELETE FROM `$tbl`"); } catch (Throwable $t) { error_log("Wipe failed for $tbl: " . $t->getMessage()); }
         }
 
         // Delete all non-admin users so the current logged-in administrator is not locked out

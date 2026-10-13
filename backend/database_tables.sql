@@ -15,9 +15,8 @@ CREATE TABLE IF NOT EXISTS `pp_users` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   
--- Insert Default Admin
-INSERT IGNORE INTO `pp_users` (`name`, `email`, `password`, `role`) VALUES
-('System Admin', 'admin@portal.com', '12121234', 'ADMIN');
+-- No default administrator is created. Create the first admin from the command line:
+--   php tools/manage_users.php create-admin you@example.com
 
 -- 2. PAYMENTS TABLE
 CREATE TABLE IF NOT EXISTS `pp_payments` (
@@ -99,4 +98,3 @@ CREATE TABLE IF NOT EXISTS `pp_accounts` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-INSERT IGNORE INTO pp_users (id, name, email, role, password, active, created_at) VALUES (1, 'System Admin', 'admin@portal.com', 'ADMIN', '12121234', 1, '2026-10-01');

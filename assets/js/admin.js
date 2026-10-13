@@ -128,6 +128,7 @@ async function load() {
         let r = (u.role && u.role.trim()) ? u.role.toUpperCase() : 'ENTRY_USER';
         if (r === 'AGENT' || r === 'TEAM_LEADER') r = 'ENTRY_USER';
         const displayRole = r;
+        const displayEmail = u.email || u.username || '';
         const deleteBtn = isCurrent ? `<span style="font-size:11px; color:var(--text-muted);">Current User</span>` :
             `<button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteUser(${u.id}, '${displayName.replace(/'/g, "\\'")}')">Delete</button>`;
         return `<tr>
@@ -463,6 +464,11 @@ if (clearAllBtn) {
 
         if (!confirmed) return;
 
+        const typed = prompt('Type DELETE ALL to confirm the wipe:');
+        if (typed !== 'DELETE ALL') { alert('Wipe cancelled: confirmation text did not match.'); return; }
+        const adminPassword = prompt('Enter your administrator password:');
+        if (!adminPassword) { alert('Wipe cancelled: password required.'); return; }
+
         clearAllBtn.disabled = true;
         const originalText = clearAllBtn.textContent;
         clearAllBtn.textContent = 'Downloading Safety Backup...';
@@ -477,7 +483,7 @@ if (clearAllBtn) {
             clearAllBtn.textContent = 'Wiping Database & Caches...';
 
             // 2. Erase all records from MySQL database
-            const res = await api('wipe_database_records', { scope: 'all' });
+            const res = await api('wipe_database_records', { scope: 'all', confirm: 'DELETE ALL', password: adminPassword });
             if (!res.success) {
                 throw new Error(res.message || 'Server failed to wipe database records');
             }
