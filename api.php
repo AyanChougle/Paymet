@@ -810,9 +810,58 @@ $raw = $pdo->query("SELECT * FROM pp_payments ORDER BY payment_date DESC, id DES
             'created_at' => $r['created_at'] ?? $r['entry_timestamp'] ?? ($r['payment_date'] ?? '')
         ];
     }
-    $lastEntry = count($payments) > 0 ? $payments[count($payments) - 1] : null;
-    out(['rawPayments' => $payments, 'lastEntry' => $lastEntry, 'rows' => $payments]);
-}
+
+$sortNewestFirst = function (&$payments) {
+    usort($payments, function ($a, $b) {
+        $dateCompare = strcmp(
+            (string) ($b['payment_date'] ?? ''),
+            (string) ($a['payment_date'] ?? '')
+        );
+
+        return $dateCompare !== 0
+            ? $dateCompare
+            : ((int) ($b['id'] ?? 0) <=> (int) ($a['id'] ?? 0));
+    });
+};
+
+// Sort the payment records BEFORE building the response
+$sortNewestFirst($payments);
+
+$lastEntry = count($payments) > 0
+    ? $payments[0]
+    : null;
+
+out([
+    'rawPayments' => $payments,
+    'lastEntry' => $lastEntry,
+    'rows' => $payments
+]);
+
+$sortNewestFirst = function (&$payments) {
+    usort($payments, function ($a, $b) {
+        $dateCompare = strcmp(
+            (string) ($b['payment_date'] ?? ''),
+            (string) ($a['payment_date'] ?? '')
+        );
+
+        return $dateCompare !== 0
+            ? $dateCompare
+            : ((int) ($b['id'] ?? 0) <=> (int) ($a['id'] ?? 0));
+    });
+};
+
+// Sort the payment records BEFORE building the response
+$sortNewestFirst($payments);
+
+$lastEntry = count($payments) > 0
+    ? $payments[0]
+    : null;
+
+out([
+    'rawPayments' => $payments,
+    'lastEntry' => $lastEntry,
+    'rows' => $payments
+]);
 
 // 5. AGENTS DIRECTORY (REQUIRES AUTH)
 if ($action === 'agents') {
