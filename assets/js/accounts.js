@@ -35,11 +35,18 @@ async function render() {
     ]);
     const payments = dashRes.rawPayments || [];
 
+    const isP2P = (mode) => {
+        const m = String(mode || '').trim().toUpperCase();
+        return m === 'P2P' || (m.includes('P2P') && !m.includes('D P2P') && !m.includes('DP2P') && !m.includes('DIRECT') && !m.includes('D-P2P'));
+    };
+
     let totalInr = 0;
     let totalUsdt = 0;
     payments.forEach(p => {
-        totalInr += (parseFloat(p.inr_amount) || 0);
-        totalUsdt += (parseFloat(p.usdt) || 0);
+        if (isP2P(p.payment_mode)) {
+            totalInr += (parseFloat(p.inr_amount) || 0);
+            totalUsdt += (parseFloat(p.usdt) || 0);
+        }
     });
 
     ledger.sort((a, b) => (b.date || '').localeCompare(a.date || ''));

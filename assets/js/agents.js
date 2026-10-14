@@ -254,7 +254,38 @@ async function loadData() {
     }
 
     if (apiSucceeded) {
-        // Authoritative Database Sync
+        // Authoritative Database Sync & Resilient Auto-Discovery
+        const existingOps = new Set(dbOps.map(o => (o.name || '').trim().toLowerCase()));
+        const existingTls = new Set(dbTls.map(t => (t.name || '').trim().toLowerCase()));
+
+        // Discover from agent directory
+        dbAgents.forEach(a => {
+            const op = (a.ops_manager || '').trim();
+            if (op && !op.toLowerCase().includes('unassigned') && !existingOps.has(op.toLowerCase())) {
+                dbOps.push({ id: 0, ecode: '', emp_id: '', name: op, reporting_to: '', reporting_level_1: '', monthly_target: 0, target: 0 });
+                existingOps.add(op.toLowerCase());
+            }
+            const tl = (a.tl || a.team_leader || '').trim();
+            if (tl && !tl.toLowerCase().includes('unassigned') && !existingTls.has(tl.toLowerCase())) {
+                dbTls.push({ id: 0, ecode: '', emp_id: '', name: tl, ops_manager: op, reporting_to: op, reporting_level_1: op, monthly_target: 0, target: 0 });
+                existingTls.add(tl.toLowerCase());
+            }
+        });
+
+        // Discover from payments
+        payments.forEach(p => {
+            const op = (p.ops_manager || '').trim();
+            if (op && !op.toLowerCase().includes('unassigned') && !existingOps.has(op.toLowerCase())) {
+                dbOps.push({ id: 0, ecode: '', emp_id: '', name: op, reporting_to: '', reporting_level_1: '', monthly_target: 0, target: 0 });
+                existingOps.add(op.toLowerCase());
+            }
+            const tl = (p.tl || p.tl_name || '').trim();
+            if (tl && !tl.toLowerCase().includes('unassigned') && !existingTls.has(tl.toLowerCase())) {
+                dbTls.push({ id: 0, ecode: '', emp_id: '', name: tl, ops_manager: op, reporting_to: op, reporting_level_1: op, monthly_target: 0, target: 0 });
+                existingTls.add(tl.toLowerCase());
+            }
+        });
+
         cachedPayments = payments;
         cachedOpsManagers = dbOps;
         cachedTeamLeaders = dbTls;

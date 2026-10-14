@@ -108,16 +108,121 @@ window.deleteClient = async function(id, clientNumber, clientName) {
     }
 };
 
+// ========================================================
+// REAL-TIME KYC INPUT FORMATTERS & VALIDATORS
+// ========================================================
+function formatClientPhone(val) {
+    if (!val) return '';
+    let digits = val.replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+        digits = digits.slice(2);
+    } else if (digits.length === 11 && digits.startsWith('0')) {
+        digits = digits.slice(1);
+    }
+    return digits.slice(0, 10);
+}
+
+function formatClientAadhar(val) {
+    if (!val) return '';
+    const digits = val.replace(/\D/g, '').slice(0, 12);
+    const parts = [];
+    for (let i = 0; i < digits.length; i += 4) {
+        parts.push(digits.slice(i, i + 4));
+    }
+    return parts.join(' ');
+}
+
+function formatClientPan(val) {
+    if (!val) return '';
+    return val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+}
+
+if (form.client_number) {
+    form.client_number.addEventListener('input', () => {
+        form.client_number.value = formatClientPhone(form.client_number.value);
+    });
+}
+if (form.pan_no) {
+    form.pan_no.addEventListener('input', () => {
+        form.pan_no.value = formatClientPan(form.pan_no.value);
+    });
+}
+if (form.aadhar_no) {
+    form.aadhar_no.addEventListener('input', () => {
+        form.aadhar_no.value = formatClientAadhar(form.aadhar_no.value);
+    });
+}
+if (form.email_id) {
+    form.email_id.addEventListener('blur', () => {
+        form.email_id.value = form.email_id.value.trim().toLowerCase();
+    });
+}
+
 form.onsubmit = async e => {
     e.preventDefault();
+    msg.textContent = '';
+    msg.className = '';
+
     const data = Object.fromEntries(new FormData(form));
+
+    // Clean & Normalize
+    data.client_number = formatClientPhone(data.client_number || '');
+    data.pan_no = formatClientPan(data.pan_no || '');
+    const rawAadhar = (data.aadhar_no || '').replace(/\D/g, '');
+    data.aadhar_no = rawAadhar;
+    data.email_id = (data.email_id || '').trim().toLowerCase();
+
+    // 1. Phone validation (Indian 10-digit mobile starting with 6-9)
+    if (data.client_number) {
+        if (!/^[6-9]\d{9}$/.test(data.client_number)) {
+            alert('Client phone number must be a valid 10-digit mobile number starting with 6, 7, 8, or 9.');
+            form.client_number.focus();
+            return;
+        }
+    } else {
+        alert('Client Phone Number is required.');
+        form.client_number.focus();
+        return;
+    }
+
+    // 2. PAN validation (5 letters, 4 digits, 1 letter)
+    if (data.pan_no && !data.pan_no.includes('*')) {
+        if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(data.pan_no)) {
+            alert('PAN Card must be exactly 10 characters in the format ABCDE1234F (5 letters, 4 digits, 1 letter).');
+            form.pan_no.focus();
+            return;
+        }
+    }
+
+    // 3. Aadhar validation (12 numeric digits, not all identical)
+    if (rawAadhar && !rawAadhar.includes('*')) {
+        if (rawAadhar.length !== 12) {
+            alert('Aadhar Card must be exactly 12 numeric digits.');
+            form.aadhar_no.focus();
+            return;
+        }
+        if (/^(\d)\1{11}$/.test(rawAadhar)) {
+            alert('Invalid Aadhar Number: cannot consist of all identical digits.');
+            form.aadhar_no.focus();
+            return;
+        }
+    }
+
+    // 4. Email validation
+    if (data.email_id) {
+        if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(data.email_id)) {
+            alert('Please provide a valid email address (e.g. name@domain.com).');
+            form.email_id.focus();
+            return;
+        }
+    }
 
     try {
         await api('upsert_client_node', data);
-        msg.textContent = 'Client saved to database!';
+        msg.textContent = 'Client profile saved successfully!';
         form.reset();
         await render();
-        setTimeout(() => msg.textContent = '', 3000);
+        setTimeout(() => msg.textContent = '', 3500);
     } catch(err) {
         alert('Error saving client: ' + err.message);
     }
@@ -140,18 +245,19 @@ if (importClientsFile) {
                 let count = 0;
 
                 for (const r of rows) {
-                    let name = r['Client Name'] || r['client_name'] || r['Name'] || r['Client'] || '';
-                    let num = r['Client Number'] || r['client_number'] || r['Phone'] || r['Mobile'] || '';
-                    let email = r['Email ID'] || r['email_id'] || r['Email'] || '';
-                    let pan = r['PAN NO'] || r['pan_no'] || r['PAN'] || '';
-                    let aadhar = r['AADHAR NO'] || r['aadhar_no'] || r['Aadhar'] || '';
-                    let state = r['STATE'] || r['state'] || r['State'] || '';
+                    let name = String(r['Client Name'] || r['client_name'] || r['Name'] || r['Client'] || '').trim();
+                    let rawNum = String(r['Client Number'] || r['client_number'] || r['Phone'] || r['Mobile'] || '').trim();
+                    let num = formatClientPhone(rawNum);
+                    let email = String(r['Email ID'] || r['email_id'] || r['Email'] || '').trim().toLowerCase();
+                    let pan = formatClientPan(String(r['PAN NO'] || r['pan_no'] || r['PAN'] || ''));
+                    let aadhar = String(r['AADHAR NO'] || r['aadhar_no'] || r['Aadhar'] || '').replace(/\D/g, '');
+                    let state = String(r['STATE'] || r['state'] || r['State'] || '').trim();
 
                     if (name || num) {
                         try {
                             await api('upsert_client_node', {
                                 client_name: name || 'Unknown Client',
-                                client_number: String(num || ''),
+                                client_number: num,
                                 email_id: email,
                                 pan_no: pan,
                                 aadhar_no: aadhar,

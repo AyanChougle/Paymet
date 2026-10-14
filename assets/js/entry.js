@@ -71,20 +71,134 @@ function autofillClient(key, value) {
     }
 }
 
+// ========================================================
+// REAL-TIME KYC INPUT FORMATTERS & VALIDATORS
+// ========================================================
+function formatClientPhone(val) {
+    if (!val) return '';
+    let digits = val.replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+        digits = digits.slice(2);
+    } else if (digits.length === 11 && digits.startsWith('0')) {
+        digits = digits.slice(1);
+    }
+    return digits.slice(0, 10);
+}
+
+function formatClientAadhar(val) {
+    if (!val) return '';
+    const digits = val.replace(/\D/g, '').slice(0, 12);
+    const parts = [];
+    for (let i = 0; i < digits.length; i += 4) {
+        parts.push(digits.slice(i, i + 4));
+    }
+    return parts.join(' ');
+}
+
+function formatClientPan(val) {
+    if (!val) return '';
+    return val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+}
+
+// Attach real-time formatting listeners
+f.client_number.addEventListener('input', () => {
+    f.client_number.value = formatClientPhone(f.client_number.value);
+    autofillClient('client_number', f.client_number.value.trim());
+});
+
+f.pan_no.addEventListener('input', () => {
+    f.pan_no.value = formatClientPan(f.pan_no.value);
+});
+
+f.aadhar_no.addEventListener('input', () => {
+    f.aadhar_no.value = formatClientAadhar(f.aadhar_no.value);
+});
+
+f.email_id.addEventListener('blur', () => {
+    f.email_id.value = f.email_id.value.trim().toLowerCase();
+});
+
 f.ecode.addEventListener('input', () => autofillAgent('ecode', f.ecode.value.trim()));
 f.agent_name.addEventListener('input', () => autofillAgent('agent_name', f.agent_name.value.trim()));
-
 f.client_name.addEventListener('input', () => autofillClient('client_name', f.client_name.value.trim()));
-f.client_number.addEventListener('input', () => autofillClient('client_number', f.client_number.value.trim()));
 f.email_id.addEventListener('input', () => autofillClient('email_id', f.email_id.value.trim()));
 
-// Submission
+// Submission with Strict Rules Verification
 f.onsubmit = async (e) => {
     e.preventDefault();
     msg.textContent = '';
     msg.className = '';
 
     const data = Object.fromEntries(new FormData(f));
+
+    // Clean & Normalize
+    data.client_number = formatClientPhone(data.client_number || '');
+    data.pan_no = formatClientPan(data.pan_no || '');
+    const rawAadhar = (data.aadhar_no || '').replace(/\D/g, '');
+    data.aadhar_no = rawAadhar;
+    data.email_id = (data.email_id || '').trim().toLowerCase();
+
+    // 1. Phone validation (Indian 10-digit mobile starting with 6-9)
+    if (data.client_number) {
+        if (!/^[6-9]\d{9}$/.test(data.client_number)) {
+            msg.className = 'error';
+            msg.textContent = 'Client phone number must be a valid 10-digit mobile number starting with 6, 7, 8, or 9.';
+            f.client_number.focus();
+            return;
+        }
+    }
+
+    // 2. PAN validation (5 letters, 4 digits, 1 letter)
+    if (data.pan_no && !data.pan_no.includes('*')) {
+        if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(data.pan_no)) {
+            msg.className = 'error';
+            msg.textContent = 'PAN Card must be exactly 10 characters in the format ABCDE1234F (5 letters, 4 digits, 1 letter).';
+            f.pan_no.focus();
+            return;
+        }
+    }
+
+    // 3. Aadhar validation (12 numeric digits, not all identical)
+    if (rawAadhar && !rawAadhar.includes('*')) {
+        if (rawAadhar.length !== 12) {
+            msg.className = 'error';
+            msg.textContent = 'Aadhar Card must be exactly 12 numeric digits.';
+            f.aadhar_no.focus();
+            return;
+        }
+        if (/^(\d)\1{11}$/.test(rawAadhar)) {
+            msg.className = 'error';
+            msg.textContent = 'Invalid Aadhar Number: cannot consist of all identical digits.';
+            f.aadhar_no.focus();
+            return;
+        }
+    }
+
+    // 4. Email validation
+    if (data.email_id) {
+        if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(data.email_id)) {
+            msg.className = 'error';
+            msg.textContent = 'Please provide a valid email address (e.g. name@domain.com).';
+            f.email_id.focus();
+            return;
+        }
+    }
+
+    // 5. Amount validation
+    const usdt = parseFloat(data.usdt || 0);
+    const div = parseFloat(data.divided_by || 0);
+    if (usdt <= 0) {
+        msg.className = 'error';
+        msg.textContent = 'USDT amount must be greater than zero.';
+        f.usdt.focus();
+        return;
+    }
+    if (div <= 0) {
+        msg.className = 'error';
+        msg.textContent = 'Divided By (Exchange Rate) must be greater than zero.';
+        f.divided_by.focus();
+        return;
+    }
 
     try {
         await api('create_payment', data);
@@ -103,6 +217,7 @@ f.onsubmit = async (e) => {
             } catch(e) {}
         }
 
+        msg.className = '';
         msg.textContent = 'Payment recorded successfully!';
         f.reset();
         f.payment_date.value = new Date().toISOString().slice(0, 10);
@@ -110,7 +225,7 @@ f.onsubmit = async (e) => {
         f.payment_mode.value = 'P2P';
         f.received_in.value = 'Digital Verse';
 
-        setTimeout(() => msg.textContent = '', 3500);
+        setTimeout(() => msg.textContent = '', 4000);
     } catch (err) {
         msg.className = 'error';
         msg.textContent = err.message || 'Failed to save payment';

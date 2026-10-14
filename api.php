@@ -321,6 +321,332 @@ function clean_str($val, $maxLen = 255) {
     return $val;
 }
 
+// KYC Rules, Normalization & Validation Helpers
+function clean_phone(?string $num): string {
+    if (!$num) return '';
+    $digits = preg_replace('/\D/', '', $num);
+    if (strlen($digits) === 12 && substr($digits, 0, 2) === '91') {
+        $digits = substr($digits, 2);
+    } elseif (strlen($digits) === 11 && substr($digits, 0, 1) === '0') {
+        $digits = substr($digits, 1);
+    }
+    return substr($digits, 0, 10);
+}
+
+function clean_aadhar(?string $aadhar): string {
+    if (!$aadhar) return '';
+    return substr(preg_replace('/\D/', '', $aadhar), 0, 12);
+}
+
+function clean_pan(?string $pan): string {
+    if (!$pan) return '';
+    return substr(strtoupper(preg_replace('/[^A-Za-z0-9*]/', '', $pan)), 0, 10);
+}
+
+function validate_kyc_rules(string $phone, string $pan, string $aadhar, string $email, bool $requirePhone = false): ?string {
+    if ($requirePhone && empty($phone)) {
+        return 'Client Phone Number is required.';
+    }
+    if ($phone !== '' && !preg_match('/^[6-9]\d{9}$/', $phone)) {
+        return 'Client phone number must be a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.';
+    }
+    if ($pan !== '' && !is_masked($pan) && !preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/', $pan)) {
+        return 'PAN card must be exactly 10 characters in the format ABCDE1234F (5 letters, 4 digits, 1 letter).';
+    }
+    if ($aadhar !== '' && !is_masked($aadhar)) {
+        $raw = preg_replace('/\D/', '', $aadhar);
+        if (strlen($raw) !== 12) {
+            return 'Aadhar number must be exactly 12 numeric digits.';
+        }
+        if (preg_match('/^(\d)\1{11}$/', $raw)) {
+            return 'Invalid Aadhar number: cannot consist of all identical digits.';
+        }
+    }
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return 'Please enter a valid email address (e.g. client@example.com).';
+    }
+    return null;
+}
+
+// Resilient Hierarchy Data Resolvers (DB + ops_tl_targets + Payments/Agents discovery)
+function get_all_ops_managers(PDO $pdo): array {
+    $ops = [];
+    $seenNames = [];
+
+    // 1. From pp_ops_managers table
+    try {
+        $rawOps = $pdo->query("SELECT * FROM pp_ops_managers ORDER BY id ASC")->fetchAll();
+        foreach ($rawOps as $r) {
+            $name = trim((string)($r['name'] ?? ''));
+            if (!$name) continue;
+            $tgt = floatval($r['monthly_target'] ?? $r['target'] ?? 0);
+            $ec = (string)($r['emp_id'] ?? $r['ecode'] ?? '');
+            $rep = (string)($r['reporting_level_1'] ?? $r['reporting_to'] ?? '');
+            $ops[] = [
+                'id' => (int)($r['id'] ?? 0),
+                'ecode' => $ec,
+                'emp_id' => $ec,
+                'name' => $name,
+                'reporting_to' => $rep,
+                'reporting_level_1' => $rep,
+                'monthly_target' => $tgt,
+                'target' => $tgt
+            ];
+            $seenNames[strtolower($name)] = count($ops) - 1;
+        }
+    } catch (Throwable $e) {}
+
+    // 2. From ops_tl_targets table if exists
+    try {
+        $hasTargetsTbl = $pdo->query("SHOW TABLES LIKE 'ops_tl_targets'")->fetchColumn();
+        if ($hasTargetsTbl) {
+            $rows = $pdo->query("SELECT * FROM ops_tl_targets")->fetchAll();
+            foreach ($rows as $r) {
+                $type = strtoupper(trim((string)($r['type'] ?? $r['role'] ?? '')));
+                $name = trim((string)($r['name'] ?? $r['ops_manager'] ?? ''));
+                if (!$name) continue;
+                if ($type === 'OPS' || strpos($type, 'OPS') !== false || (!$type && !isset($r['tl']))) {
+                    $tgt = floatval($r['target'] ?? $r['monthly_target'] ?? 0);
+                    $ec = (string)($r['ecode'] ?? $r['emp_id'] ?? '');
+                    $rep = (string)($r['reporting_to'] ?? $r['reporting_level_1'] ?? '');
+                    $key = strtolower($name);
+                    if (!isset($seenNames[$key])) {
+                        $ops[] = [
+                            'id' => (int)($r['id'] ?? 0),
+                            'ecode' => $ec,
+                            'emp_id' => $ec,
+                            'name' => $name,
+                            'reporting_to' => $rep,
+                            'reporting_level_1' => $rep,
+                            'monthly_target' => $tgt,
+                            'target' => $tgt
+                        ];
+                        $seenNames[$key] = count($ops) - 1;
+                    } elseif ($tgt > 0 && $ops[$seenNames[$key]]['target'] == 0) {
+                        $ops[$seenNames[$key]]['target'] = $tgt;
+                        $ops[$seenNames[$key]]['monthly_target'] = $tgt;
+                    }
+                }
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // 3. Fallback discovery from pp_agents
+    try {
+        $agOps = $pdo->query("SELECT DISTINCT ops_manager FROM pp_agents WHERE ops_manager IS NOT NULL AND TRIM(ops_manager) != ''")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($agOps as $opName) {
+            $name = trim((string)$opName);
+            if (!$name || strtolower($name) === 'unassigned ops' || strtolower($name) === 'unassigned ops manager') continue;
+            $key = strtolower($name);
+            if (!isset($seenNames[$key])) {
+                $ops[] = [
+                    'id' => 0,
+                    'ecode' => '',
+                    'emp_id' => '',
+                    'name' => $name,
+                    'reporting_to' => '',
+                    'reporting_level_1' => '',
+                    'monthly_target' => 0,
+                    'target' => 0
+                ];
+                $seenNames[$key] = count($ops) - 1;
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // 4. Fallback discovery from pp_payments
+    try {
+        $payOps = $pdo->query("SELECT DISTINCT ops_manager FROM pp_payments WHERE ops_manager IS NOT NULL AND TRIM(ops_manager) != ''")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($payOps as $opName) {
+            $name = trim((string)$opName);
+            if (!$name || strtolower($name) === 'unassigned ops' || strtolower($name) === 'unassigned ops manager') continue;
+            $key = strtolower($name);
+            if (!isset($seenNames[$key])) {
+                $ops[] = [
+                    'id' => 0,
+                    'ecode' => '',
+                    'emp_id' => '',
+                    'name' => $name,
+                    'reporting_to' => '',
+                    'reporting_level_1' => '',
+                    'monthly_target' => 0,
+                    'target' => 0
+                ];
+                $seenNames[$key] = count($ops) - 1;
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // Ensure authoritative monthly targets are guaranteed
+    foreach ($ops as &$o) {
+        if ($o['target'] <= 0) {
+            $nLow = strtolower($o['name']);
+            if (strpos($nLow, 'rushikesh') !== false) {
+                $o['target'] = 3500000;
+                $o['monthly_target'] = 3500000;
+                if ($o['id'] > 0) @$pdo->exec("UPDATE pp_ops_managers SET target=3500000, monthly_target=3500000 WHERE id=" . (int)$o['id']);
+            } elseif (strpos($nLow, 'arshad') !== false) {
+                $o['target'] = 3500000;
+                $o['monthly_target'] = 3500000;
+                if ($o['id'] > 0) @$pdo->exec("UPDATE pp_ops_managers SET target=3500000, monthly_target=3500000 WHERE id=" . (int)$o['id']);
+            }
+        }
+    }
+    unset($o);
+
+    return $ops;
+}
+
+function get_all_team_leaders(PDO $pdo): array {
+    $tls = [];
+    $seenNames = [];
+
+    // 1. From pp_team_leaders table
+    try {
+        $rawTls = $pdo->query("SELECT * FROM pp_team_leaders ORDER BY id ASC")->fetchAll();
+        foreach ($rawTls as $r) {
+            $name = trim((string)($r['name'] ?? ''));
+            if (!$name) continue;
+            $tgt = floatval($r['monthly_target'] ?? $r['target'] ?? 0);
+            $ec = (string)($r['emp_id'] ?? $r['ecode'] ?? '');
+            $rep = (string)($r['reporting_level_1'] ?? $r['ops_manager'] ?? $r['reporting_to'] ?? '');
+            $tls[] = [
+                'id' => (int)($r['id'] ?? 0),
+                'ecode' => $ec,
+                'emp_id' => $ec,
+                'name' => $name,
+                'ops_manager' => $rep,
+                'reporting_to' => $rep,
+                'reporting_level_1' => $rep,
+                'monthly_target' => $tgt,
+                'target' => $tgt
+            ];
+            $seenNames[strtolower($name)] = count($tls) - 1;
+        }
+    } catch (Throwable $e) {}
+
+    // 2. From ops_tl_targets table if exists
+    try {
+        $hasTargetsTbl = $pdo->query("SHOW TABLES LIKE 'ops_tl_targets'")->fetchColumn();
+        if ($hasTargetsTbl) {
+            $rows = $pdo->query("SELECT * FROM ops_tl_targets")->fetchAll();
+            foreach ($rows as $r) {
+                $type = strtoupper(trim((string)($r['type'] ?? $r['role'] ?? '')));
+                $name = trim((string)($r['name'] ?? $r['tl'] ?? $r['team_leader'] ?? ''));
+                if (!$name) continue;
+                if ($type === 'TL' || strpos($type, 'TL') !== false || strpos($type, 'TEAM') !== false) {
+                    $tgt = floatval($r['target'] ?? $r['monthly_target'] ?? 0);
+                    $ec = (string)($r['ecode'] ?? $r['emp_id'] ?? '');
+                    $rep = (string)($r['ops_manager'] ?? $r['reporting_to'] ?? $r['reporting_level_1'] ?? '');
+                    $key = strtolower($name);
+                    if (!isset($seenNames[$key])) {
+                        $tls[] = [
+                            'id' => (int)($r['id'] ?? 0),
+                            'ecode' => $ec,
+                            'emp_id' => $ec,
+                            'name' => $name,
+                            'ops_manager' => $rep,
+                            'reporting_to' => $rep,
+                            'reporting_level_1' => $rep,
+                            'monthly_target' => $tgt,
+                            'target' => $tgt
+                        ];
+                        $seenNames[$key] = count($tls) - 1;
+                    } elseif ($tgt > 0 && $tls[$seenNames[$key]]['target'] == 0) {
+                        $tls[$seenNames[$key]]['target'] = $tgt;
+                        $tls[$seenNames[$key]]['monthly_target'] = $tgt;
+                    }
+                }
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // 3. Fallback discovery from pp_agents
+    try {
+        $agTls = $pdo->query("SELECT DISTINCT tl, ops_manager FROM pp_agents WHERE tl IS NOT NULL AND TRIM(tl) != ''")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($agTls as $r) {
+            $name = trim((string)($r['tl'] ?? ''));
+            if (!$name || strtolower($name) === 'unassigned tl' || strtolower($name) === 'unassigned team leader') continue;
+            $rep = trim((string)($r['ops_manager'] ?? ''));
+            $key = strtolower($name);
+            if (!isset($seenNames[$key])) {
+                $tls[] = [
+                    'id' => 0,
+                    'ecode' => '',
+                    'emp_id' => '',
+                    'name' => $name,
+                    'ops_manager' => $rep,
+                    'reporting_to' => $rep,
+                    'reporting_level_1' => $rep,
+                    'monthly_target' => 0,
+                    'target' => 0
+                ];
+                $seenNames[$key] = count($tls) - 1;
+            } elseif ($rep && empty($tls[$seenNames[$key]]['ops_manager'])) {
+                $tls[$seenNames[$key]]['ops_manager'] = $rep;
+                $tls[$seenNames[$key]]['reporting_to'] = $rep;
+                $tls[$seenNames[$key]]['reporting_level_1'] = $rep;
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // 4. Fallback discovery from pp_payments
+    try {
+        $payTls = $pdo->query("SELECT DISTINCT tl, ops_manager FROM pp_payments WHERE tl IS NOT NULL AND TRIM(tl) != ''")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($payTls as $r) {
+            $name = trim((string)($r['tl'] ?? ''));
+            if (!$name || strtolower($name) === 'unassigned tl' || strtolower($name) === 'unassigned team leader') continue;
+            $rep = trim((string)($r['ops_manager'] ?? ''));
+            $key = strtolower($name);
+            if (!isset($seenNames[$key])) {
+                $tls[] = [
+                    'id' => 0,
+                    'ecode' => '',
+                    'emp_id' => '',
+                    'name' => $name,
+                    'ops_manager' => $rep,
+                    'reporting_to' => $rep,
+                    'reporting_level_1' => $rep,
+                    'monthly_target' => 0,
+                    'target' => 0
+                ];
+                $seenNames[$key] = count($tls) - 1;
+            } elseif ($rep && empty($tls[$seenNames[$key]]['ops_manager'])) {
+                $tls[$seenNames[$key]]['ops_manager'] = $rep;
+                $tls[$seenNames[$key]]['reporting_to'] = $rep;
+                $tls[$seenNames[$key]]['reporting_level_1'] = $rep;
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // Ensure authoritative monthly targets are guaranteed
+    foreach ($tls as &$t) {
+        if ($t['target'] <= 0) {
+            $nLow = strtolower($t['name']);
+            if (strpos($nLow, 'mayur') !== false) {
+                $t['target'] = 1500000;
+                $t['monthly_target'] = 1500000;
+                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1500000, monthly_target=1500000 WHERE id=" . (int)$t['id']);
+            } elseif (strpos($nLow, 'viren') !== false) {
+                $t['target'] = 1750000;
+                $t['monthly_target'] = 1750000;
+                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1750000, monthly_target=1750000 WHERE id=" . (int)$t['id']);
+            } elseif (strpos($nLow, 'ritik') !== false) {
+                $t['target'] = 1500000;
+                $t['monthly_target'] = 1500000;
+                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1500000, monthly_target=1500000 WHERE id=" . (int)$t['id']);
+            } elseif (strpos($nLow, 'saif') !== false) {
+                $t['target'] = 1750000;
+                $t['monthly_target'] = 1750000;
+                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1750000, monthly_target=1750000 WHERE id=" . (int)$t['id']);
+            }
+        }
+    }
+    unset($t);
+
+    return $tls;
+}
+
 // ========================================================
 // REQUEST ROUTING
 // ========================================================
@@ -505,39 +831,8 @@ if ($action === 'agents') {
         ];
     }
 
-    $rawOps = $pdo->query("SELECT * FROM pp_ops_managers ORDER BY id ASC")->fetchAll();
-    $ops = [];
-    foreach ($rawOps as $r) {
-        $tgt = floatval($r['monthly_target'] ?? $r['target'] ?? 0);
-        $ops[] = [
-            'id' => (int)($r['id'] ?? 0),
-            'ecode' => $r['emp_id'] ?? $r['ecode'] ?? '',
-            'emp_id' => $r['emp_id'] ?? $r['ecode'] ?? '',
-            'name' => $r['name'] ?? '',
-            'reporting_to' => $r['reporting_level_1'] ?? $r['reporting_to'] ?? '',
-            'reporting_level_1' => $r['reporting_level_1'] ?? $r['reporting_to'] ?? '',
-            'monthly_target' => $tgt,
-            'target' => $tgt
-        ];
-    }
-
-    $rawTls = $pdo->query("SELECT * FROM pp_team_leaders ORDER BY id ASC")->fetchAll();
-    $tls = [];
-    foreach ($rawTls as $r) {
-        $tgt = floatval($r['monthly_target'] ?? $r['target'] ?? 0);
-        $rep = $r['reporting_level_1'] ?? $r['ops_manager'] ?? $r['reporting_to'] ?? '';
-        $tls[] = [
-            'id' => (int)($r['id'] ?? 0),
-            'ecode' => $r['emp_id'] ?? $r['ecode'] ?? '',
-            'emp_id' => $r['emp_id'] ?? $r['ecode'] ?? '',
-            'name' => $r['name'] ?? '',
-            'ops_manager' => $rep,
-            'reporting_to' => $rep,
-            'reporting_level_1' => $rep,
-            'monthly_target' => $tgt,
-            'target' => $tgt
-        ];
-    }
+    $ops = get_all_ops_managers($pdo);
+    $tls = get_all_team_leaders($pdo);
 
     out(['agents' => $agents, 'ops_managers' => $ops, 'team_leaders' => $tls, 'rows' => $agents]);
 }
@@ -545,39 +840,14 @@ if ($action === 'agents') {
 // 5b. OPS MANAGERS DIRECTORY (REQUIRES AUTH)
 if ($action === 'ops_managers') {
     require_auth();
-    $rawOps = $pdo->query("SELECT * FROM pp_ops_managers ORDER BY id ASC")->fetchAll();
-    $ops = [];
-    foreach ($rawOps as $r) {
-        $tgt = floatval($r['monthly_target'] ?? $r['target'] ?? 0);
-        $ops[] = [
-            'id' => (int)($r['id'] ?? 0),
-            'ecode' => $r['emp_id'] ?? $r['ecode'] ?? '',
-            'name' => $r['name'] ?? '',
-            'reporting_to' => $r['reporting_level_1'] ?? $r['reporting_to'] ?? '',
-            'target' => $tgt,
-            'monthly_target' => $tgt
-        ];
-    }
+    $ops = get_all_ops_managers($pdo);
     out(['opsManagers' => $ops, 'ops_managers' => $ops]);
 }
 
 // 5c. TEAM LEADERS DIRECTORY (REQUIRES AUTH)
 if ($action === 'team_leaders') {
     require_auth();
-    $rawTls = $pdo->query("SELECT * FROM pp_team_leaders ORDER BY id ASC")->fetchAll();
-    $tls = [];
-    foreach ($rawTls as $r) {
-        $tgt = floatval($r['monthly_target'] ?? $r['target'] ?? 0);
-        $rep = $r['reporting_level_1'] ?? $r['ops_manager'] ?? $r['reporting_to'] ?? '';
-        $tls[] = [
-            'id' => (int)($r['id'] ?? 0),
-            'ecode' => $r['emp_id'] ?? $r['ecode'] ?? '',
-            'name' => $r['name'] ?? '',
-            'ops_manager' => $rep,
-            'target' => $tgt,
-            'monthly_target' => $tgt
-        ];
-    }
+    $tls = get_all_team_leaders($pdo);
     out(['teamLeaders' => $tls, 'team_leaders' => $tls]);
 }
 
@@ -703,16 +973,22 @@ if ($action === 'create_payment') {
     $mode = clean_str($data['payment_mode'] ?? 'P2P', 50);
     if ($mode === '') $mode = 'P2P';
     $recIn = clean_str($data['received_in'] ?? $data['received_company'] ?? 'Digital Verse', 100);
+    $recLow = strtolower($recIn);
+    if (strpos($recLow, 'world') !== false || strpos($recLow, 'krypto') !== false || strpos($recLow, 'crypto') !== false || strpos($recLow, 'wk') !== false) {
+        $recIn = (strpos($recLow, 'crypto') !== false) ? 'World of Crypto' : 'World of Krypto';
+    } elseif (strpos($recLow, 'digital') !== false || strpos($recLow, 'dv') !== false) {
+        $recIn = 'Digital Verse';
+    }
 
     $ecode = clean_str($data['ecode'] ?? '', 50);
     $tl = clean_str($data['tl'] ?? '', 150);
     $ops = clean_str($data['ops_manager'] ?? '', 150);
     $cName = clean_str($data['client_name'] ?? '', 150);
-    $cNum = clean_str($data['client_number'] ?? '', 50);
-    $email = clean_str($data['email_id'] ?? '', 150);
+    $cNum = clean_phone($data['client_number'] ?? '');
+    $email = strtolower(trim(clean_str($data['email_id'] ?? '', 150)));
     $ratio = clean_str($data['ratio'] ?? '', 50);
-    $pan = strtoupper(clean_str($data['pan_no'] ?? '', 30));
-    $aadhar = clean_str($data['aadhar_no'] ?? '', 30);
+    $pan = clean_pan($data['pan_no'] ?? '');
+    $aadhar = clean_aadhar($data['aadhar_no'] ?? '');
     $state = clean_str($data['state'] ?? '', 100);
 
     if (is_masked($pan) || is_masked($aadhar)) {
@@ -723,8 +999,13 @@ if ($action === 'create_payment') {
             $st->execute([$cNum]);
             $real = $st->fetch() ?: $real;
         }
-        if (is_masked($pan)) $pan = strtoupper((string)($real['pan_no'] ?? ''));
-        if (is_masked($aadhar)) $aadhar = (string)($real['aadhar_no'] ?? '');
+        if (is_masked($pan)) $pan = clean_pan((string)($real['pan_no'] ?? ''));
+        if (is_masked($aadhar)) $aadhar = clean_aadhar((string)($real['aadhar_no'] ?? ''));
+    }
+
+    $kycErr = validate_kyc_rules($cNum, $pan, $aadhar, $email, false);
+    if ($kycErr) {
+        err($kycErr);
     }
 
     try {
@@ -866,11 +1147,11 @@ if ($action === 'bulk_import') {
     // 4. Clients KYC
     foreach ($clientsList as $c) {
         $cName = clean_str($c['client_name'] ?? $c['name'] ?? '', 150);
-        $cNum = clean_str($c['client_number'] ?? $c['phone'] ?? '', 50);
+        $cNum = clean_phone($c['client_number'] ?? $c['phone'] ?? '');
         if (!$cName && !$cNum) continue;
-        $email = clean_str($c['email_id'] ?? $c['email'] ?? '', 150);
-        $pan = strtoupper(clean_str($c['pan_no'] ?? $c['pan'] ?? '', 30));
-        $aadhar = clean_str($c['aadhar_no'] ?? $c['aadhar'] ?? '', 30);
+        $email = strtolower(trim(clean_str($c['email_id'] ?? $c['email'] ?? '', 150)));
+        $pan = clean_pan($c['pan_no'] ?? $c['pan'] ?? '');
+        $aadhar = clean_aadhar($c['aadhar_no'] ?? $c['aadhar'] ?? '');
         $state = clean_str($c['state'] ?? '', 100);
 
         $foundId = null;
@@ -914,14 +1195,20 @@ if ($action === 'bulk_import') {
         $tl = clean_str($p['tl'] ?? '', 150);
         $ops = clean_str($p['ops_manager'] ?? '', 150);
         $cName = clean_str($p['client_name'] ?? '', 150);
-        $cNum = clean_str($p['client_number'] ?? '', 50);
-        $email = clean_str($p['email_id'] ?? '', 150);
+        $cNum = clean_phone($p['client_number'] ?? '');
+        $email = strtolower(trim(clean_str($p['email_id'] ?? '', 150)));
         $mode = clean_str($p['payment_mode'] ?? 'P2P', 50);
         $ratio = clean_str($p['ratio'] ?? '', 50);
-        $pan = strtoupper(clean_str($p['pan_no'] ?? '', 30));
-        $aadhar = clean_str($p['aadhar_no'] ?? '', 30);
+        $pan = clean_pan($p['pan_no'] ?? '');
+        $aadhar = clean_aadhar($p['aadhar_no'] ?? '');
         $state = clean_str($p['state'] ?? '', 100);
         $recIn = clean_str($p['received_in'] ?? $p['received_company'] ?? 'Digital Verse', 100);
+        $recLow = strtolower($recIn);
+        if (strpos($recLow, 'world') !== false || strpos($recLow, 'krypto') !== false || strpos($recLow, 'crypto') !== false || strpos($recLow, 'wk') !== false) {
+            $recIn = (strpos($recLow, 'crypto') !== false) ? 'World of Crypto' : 'World of Krypto';
+        } elseif (strpos($recLow, 'digital') !== false || strpos($recLow, 'dv') !== false) {
+            $recIn = 'Digital Verse';
+        }
         $div = round((float)($p['divided_by'] ?? 0), 2);
         if ($usdt > 0 && $inr > 0 && ($div <= 0 || !isset($p['divided_by']))) {
             $div = round($inr / $usdt, 4);
@@ -1363,13 +1650,18 @@ if ($action === 'upsert_client_node') {
     require_auth(); // Allowed during payment recording by any authenticated staff
 
     $cName = clean_str($data['client_name'] ?? '', 150);
-    $cNum = clean_str($data['client_number'] ?? '', 50);
-    $email = clean_str($data['email_id'] ?? '', 150);
-    $pan = strtoupper(clean_str($data['pan_no'] ?? '', 30));
-    $aadhar = clean_str($data['aadhar_no'] ?? '', 30);
+    $cNum = clean_phone($data['client_number'] ?? '');
+    $email = strtolower(trim(clean_str($data['email_id'] ?? '', 150)));
+    $pan = clean_pan($data['pan_no'] ?? '');
+    $aadhar = clean_aadhar($data['aadhar_no'] ?? '');
     $state = clean_str($data['state'] ?? '', 100);
 
     if (!$cName && !$cNum) err('Client Name or Phone Number is required.');
+
+    $kycErr = validate_kyc_rules($cNum, $pan, $aadhar, $email, false);
+    if ($kycErr) {
+        err($kycErr);
+    }
 
     $check = null;
     if ($cNum) {

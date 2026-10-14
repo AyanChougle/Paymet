@@ -77,12 +77,23 @@
                 <h2>Add / Update Client Profile</h2>
             </div>
             <form id="clientForm" class="form-grid" autocomplete="off">
-                <label>Client Name<input name="client_name" placeholder="Enter Client Name" required></label>
-                <label>Client Phone Number<input name="client_number" placeholder="10-digit mobile" required></label>
-                <label>Email ID<input name="email_id" type="email" placeholder="client@example.com"></label>
-                <label>PAN Card Number<input name="pan_no" placeholder="ABCDE1234F" style="text-transform:uppercase;"
-                        maxlength="10"></label>
-                <label>Aadhar Card Number<input name="aadhar_no" placeholder="12-digit Aadhar" maxlength="16"></label>
+                <label>Client Name<input name="client_name" id="c_client_name" placeholder="Enter Client Name" required></label>
+                <label>Client Phone Number
+                    <input name="client_number" id="c_client_number" type="tel" placeholder="10-digit mobile" maxlength="10" required>
+                    <small style="font-size:11px; color:var(--text-muted); display:block; margin-top:2px;">10-digit mobile (starts with 6, 7, 8, or 9)</small>
+                </label>
+                <label>Email ID
+                    <input name="email_id" id="c_email_id" type="email" placeholder="client@example.com">
+                    <small style="font-size:11px; color:var(--text-muted); display:block; margin-top:2px;">Valid email (e.g. name@domain.com)</small>
+                </label>
+                <label>PAN Card Number
+                    <input name="pan_no" id="c_pan_no" placeholder="ABCDE1234F" style="text-transform:uppercase;" maxlength="10">
+                    <small style="font-size:11px; color:var(--text-muted); display:block; margin-top:2px;">10-char PAN (5 letters, 4 digits, 1 letter)</small>
+                </label>
+                <label>Aadhar Card Number
+                    <input name="aadhar_no" id="c_aadhar_no" placeholder="12-digit Aadhar" maxlength="14">
+                    <small style="font-size:11px; color:var(--text-muted); display:block; margin-top:2px;">12-digit UIDAI (XXXX XXXX XXXX)</small>
+                </label>
                 <label>State / Region
                     <select name="state">
                         <option value="">Select State / UT</option>
@@ -154,8 +165,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=15"></script>
-    <script src="assets/js/auth.js?v=15"></script>
-    <script src="assets/js/clients.js?v=15"></script>
+    <script src="assets/js/api.js?v=16"></script>
+    <script src="assets/js/auth.js?v=16"></script>
+    <script src="assets/js/clients.js?v=16"></script>
 </body>
 </html>

@@ -28,19 +28,50 @@ function getAgentEcode(name) {
     return found && found.ecode ? found.ecode : '-';
 }
 
+const CANONICAL_ROLE_TARGETS = {
+    OPS: {
+        'rushikesh': 3500000,
+        'arshad': 3500000
+    },
+    TL: {
+        'mayur': 1500000,
+        'viren': 1750000,
+        'ritik': 1500000,
+        'saif': 1750000
+    }
+};
+
 function getRoleTarget(type, name) {
     if (!name) return 0;
     const clean = (name || '').trim().toLowerCase();
-    if (type === 'OPS' && window.dbOps) {
-        const found = window.dbOps.find(o => (o.name || '').trim().toLowerCase() === clean);
-        if (found && (found.monthly_target || found.target)) return parseFloat(found.monthly_target || found.target);
-    } else if (type === 'TL' && window.dbTls) {
-        const found = window.dbTls.find(t => (t.name || '').trim().toLowerCase() === clean);
-        if (found && (found.monthly_target || found.target)) return parseFloat(found.monthly_target || found.target);
+    
+    const list = type === 'OPS' ? (window.dbOps || JSON.parse(localStorage.getItem('pp_ops_managers') || '[]')) 
+                                : (window.dbTls || JSON.parse(localStorage.getItem('pp_team_leaders') || '[]'));
+    for (const item of list) {
+        const iName = (item.name || '').trim().toLowerCase();
+        if (iName === clean || iName.includes(clean) || clean.includes(iName)) {
+            const tgt = parseFloat(item.monthly_target || item.target || 0);
+            if (tgt > 0) return tgt;
+        }
     }
+
     const targets = JSON.parse(localStorage.getItem('pp_targets') || '[]');
-    const found = targets.find(t => t.type === type && (t.name || '').toLowerCase() === clean);
-    return found && found.target ? parseFloat(found.target) : 0;
+    for (const t of targets) {
+        if (t.type === type) {
+            const tName = (t.name || '').trim().toLowerCase();
+            if (tName === clean || tName.includes(clean) || clean.includes(tName)) {
+                const tgt = parseFloat(t.target || t.monthly_target || 0);
+                if (tgt > 0) return tgt;
+            }
+        }
+    }
+
+    const defMap = CANONICAL_ROLE_TARGETS[type] || {};
+    for (const [k, v] of Object.entries(defMap)) {
+        if (clean.includes(k)) return v;
+    }
+
+    return 0;
 }
 
 // Tab Switching
@@ -117,11 +148,16 @@ async function load() {
 
     if (apiSucceeded) {
         // Authoritative Database Sync
+        window.dbOps = dbOps;
+        window.dbTls = dbTls;
         localStorage.setItem('pp_payments', JSON.stringify(payments));
         localStorage.setItem('pp_ops_managers', JSON.stringify(dbOps));
         localStorage.setItem('pp_team_leaders', JSON.stringify(dbTls));
         localStorage.setItem('pp_agents', JSON.stringify(dbAgents));
         localStorage.setItem('pp_mappings', JSON.stringify(dbAgents));
+    } else {
+        window.dbOps = dbOps;
+        window.dbTls = dbTls;
     }
 
     // Last Entry Audit Display
@@ -290,7 +326,7 @@ async function load() {
                 mtd: 0,
                 ftd: 0,
                 teams: new Set(),
-                target: parseFloat(o.monthly_target || getRoleTarget('OPS', name) || 0),
+                target: (parseFloat(o.monthly_target || o.target || 0) || getRoleTarget('OPS', name)),
                 modeMap: { 'P2P': 0, 'D P2P': 0 },
                 compMap: { 'Digital Verse': 0, 'World of Crypto': 0 }
             };
@@ -309,7 +345,7 @@ async function load() {
                 mtd: 0,
                 ftd: 0,
                 opsManager: resolvedOps,
-                target: parseFloat(t.monthly_target || t.target || getRoleTarget('TL', canonicalName) || 0)
+                target: (parseFloat(t.monthly_target || t.target || 0) || getRoleTarget('TL', canonicalName) || getRoleTarget('TL', name))
             };
             if (resolvedOps && opsMap[resolvedOps]) {
                 opsMap[resolvedOps].teams.add(canonicalName);
@@ -361,22 +397,50 @@ async function load() {
         if (!rawTl && agName !== 'Unassigned') {
             rawTl = agentToTl[agName.toLowerCase()] || '';
         }
-        let tlName = resolveTlName(rawTl);
-        if (!tlDbNames.has(tlName.toLowerCase()) && agentToTl[agName.toLowerCase()]) {
-            tlName = resolveTlName(agentToTl[agName.toLowerCase()]);
+        let tlName = resolveTlName(rawTl) || rawTl;
+        if (!tlName || tlName.toLowerCase().includes('unassigned')) {
+            tlName = 'Unassigned TL';
         }
-        if (!tlDbNames.has(tlName.toLowerCase())) {
-            tlName = rawTl || 'Unassigned TL';
+
+        // Auto-create in tlMap if not present
+        if (tlName !== 'Unassigned TL' && !tlMap[tlName]) {
+            const resolvedOps = resolveOpsName(p.ops_manager || agentToOps[agName.toLowerCase()] || tlToOps[tlName.toLowerCase()] || '');
+            tlMap[tlName] = {
+                name: tlName,
+                mtd: 0,
+                ftd: 0,
+                opsManager: resolvedOps,
+                target: getRoleTarget('TL', tlName) || 0
+            };
         }
 
         // Resolve Ops Manager
         let rawOps = (p.ops_manager || '').trim();
-        rawOps = resolveOpsName(rawOps);
-        if (!rawOps || !opsDbNames.has(rawOps.toLowerCase())) {
-            if (tlName && tlToOps[tlName.toLowerCase()]) rawOps = tlToOps[tlName.toLowerCase()];
-            if (!rawOps && agName !== 'Unassigned') rawOps = agentToOps[agName.toLowerCase()] || '';
+        if (!rawOps) {
+            if (tlName && tlName !== 'Unassigned TL' && tlToOps[tlName.toLowerCase()]) {
+                rawOps = tlToOps[tlName.toLowerCase()];
+            }
+            if (!rawOps && agName !== 'Unassigned') {
+                rawOps = agentToOps[agName.toLowerCase()] || '';
+            }
         }
-        let opsName = opsDbNames.has(rawOps.toLowerCase()) ? rawOps : 'Unassigned Ops';
+        let opsName = resolveOpsName(rawOps) || rawOps;
+        if (!opsName || opsName.toLowerCase().includes('unassigned')) {
+            opsName = 'Unassigned Ops';
+        }
+
+        // Auto-create in opsMap if not present
+        if (opsName !== 'Unassigned Ops' && !opsMap[opsName]) {
+            opsMap[opsName] = {
+                name: opsName,
+                mtd: 0,
+                ftd: 0,
+                teams: new Set(),
+                target: getRoleTarget('OPS', opsName) || 0,
+                modeMap: { 'P2P': 0, 'D P2P': 0, 'Vendor': 0 },
+                compMap: { 'Digital Verse': 0, 'World of Crypto': 0 }
+            };
+        }
 
         const modeKey = (mode.toLowerCase().includes('vendor') ? 'Vendor' : (mode.toUpperCase().includes('D') && mode.toUpperCase().includes('P2P') ? 'D P2P' : 'P2P'));
         const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : (comp.toLowerCase().includes('digital') || comp.toLowerCase().includes('dv') ? 'Digital Verse' : (comp || 'Digital Verse'));
@@ -402,15 +466,15 @@ async function load() {
         if (isMtd) agentMap[agName].mtd += inr;
         if (isFtd) agentMap[agName].ftd += inr;
 
-        // TL Sales (Only true TLs from DB)
+        // TL Sales
         if (tlMap[tlName]) {
             if (isMtd) tlMap[tlName].mtd += inr;
             if (isFtd) tlMap[tlName].ftd += inr;
         }
 
-        // Ops Manager Sales (Only true Ops Managers from DB)
+        // Ops Manager Sales
         if (opsMap[opsName]) {
-            if (tlName !== 'Unassigned TL' && tlDbNames.has(tlName.toLowerCase())) opsMap[opsName].teams.add(tlName);
+            if (tlName !== 'Unassigned TL') opsMap[opsName].teams.add(tlName);
             if (isMtd) {
                 opsMap[opsName].mtd += inr;
                 opsMap[opsName].modeMap[modeKey] = (opsMap[opsName].modeMap[modeKey] || 0) + inr;

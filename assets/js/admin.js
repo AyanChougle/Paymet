@@ -191,10 +191,11 @@ userForm.onsubmit = async e => {
 //   Accounts Handover (not imported: ledger entries are added on the Accounts page)
 const IMPORT_COMPANY_ALIASES = { 
     dv: 'Digital Verse', 
-    wok: 'World of Crypto', 
-    wk: 'World of Crypto',
+    wok: 'World of Krypto', 
+    wk: 'World of Krypto',
     'digital verse': 'Digital Verse',
-    'world of crypto': 'World of Crypto'
+    'world of krypto': 'World of Krypto',
+    'world of crypto': 'World of Krypto'
 };
 const IMPORT_EMPTY_MARKERS = ['(blank)', '-', 'null', 'undefined'];
 
@@ -614,8 +615,8 @@ async function parseMasterWorkbook(wb, report) {
 
         const rc = impClean(g('receivedcompany') || g('receivedin'));
         let company = rc;
-        if (rc.toLowerCase().includes('world') || rc.toLowerCase().includes('wk') || rc.toLowerCase().includes('wok')) {
-            company = 'World of Crypto';
+        if (rc.toLowerCase().includes('world') || rc.toLowerCase().includes('wk') || rc.toLowerCase().includes('wok') || rc.toLowerCase().includes('krypto') || rc.toLowerCase().includes('crypto')) {
+            company = 'World of Krypto';
         } else if (rc.toLowerCase().includes('digital') || rc.toLowerCase().includes('dv') || !rc) {
             company = 'Digital Verse';
         }
@@ -635,6 +636,16 @@ async function parseMasterWorkbook(wb, report) {
             tl = dir.tl || tl;
         }
 
+        const rawNum = impClean(g('clientnumber'));
+        let cleanNum = rawNum.replace(/\D/g, '');
+        if (cleanNum.length === 12 && cleanNum.startsWith('91')) cleanNum = cleanNum.slice(2);
+        else if (cleanNum.length === 11 && cleanNum.startsWith('0')) cleanNum = cleanNum.slice(1);
+        cleanNum = cleanNum.slice(0, 10);
+
+        const cleanPan = impClean(g('panno')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+        const cleanAadhar = impClean(g('aadharno')).replace(/\D/g, '').slice(0, 12);
+        const cleanEmail = impClean(g('emailid')).toLowerCase().trim();
+
         const p = {
             payment_date: date,
             ecode: ecode || (dir ? dir.ecode : ''),
@@ -642,15 +653,15 @@ async function parseMasterWorkbook(wb, report) {
             tl: tl || '',
             ops_manager: ops || '',
             client_name: impClean(g('clientname')),
-            client_number: impClean(g('clientnumber')),
-            email_id: impClean(g('emailid')),
+            client_number: cleanNum,
+            email_id: cleanEmail,
             payment_mode: mode,
             usdt,
             inr_amount: inr,
             divided_by: Math.round((inr / usdt) * 100) / 100,
             ratio: impClean(g('ratio')),
-            pan_no: impClean(g('panno')).toUpperCase(),
-            aadhar_no: impClean(g('aadharno')),
+            pan_no: cleanPan,
+            aadhar_no: cleanAadhar,
             state: impClean(g('state')),
             received_in: company
         };

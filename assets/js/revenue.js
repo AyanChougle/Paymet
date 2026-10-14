@@ -361,22 +361,50 @@ async function load() {
         if (!rawTl && agName !== 'Unassigned') {
             rawTl = agentToTl[agName.toLowerCase()] || '';
         }
-        let tlName = resolveTlName(rawTl);
-        if (!tlDbNames.has(tlName.toLowerCase()) && agentToTl[agName.toLowerCase()]) {
-            tlName = resolveTlName(agentToTl[agName.toLowerCase()]);
+        let tlName = resolveTlName(rawTl) || rawTl;
+        if (!tlName || tlName.toLowerCase().includes('unassigned')) {
+            tlName = 'Unassigned TL';
         }
-        if (!tlDbNames.has(tlName.toLowerCase())) {
-            tlName = rawTl || 'Unassigned TL';
+
+        // Auto-create in tlMap if not present
+        if (tlName !== 'Unassigned TL' && !tlMap[tlName]) {
+            const resolvedOps = resolveOpsName(p.ops_manager || agentToOps[agName.toLowerCase()] || tlToOps[tlName.toLowerCase()] || '');
+            tlMap[tlName] = {
+                name: tlName,
+                mtd: 0,
+                ftd: 0,
+                opsManager: resolvedOps,
+                target: getRoleTarget('TL', tlName) || 0
+            };
         }
 
         // Resolve Ops Manager
         let rawOps = (p.ops_manager || '').trim();
-        rawOps = resolveOpsName(rawOps);
-        if (!rawOps || !opsDbNames.has(rawOps.toLowerCase())) {
-            if (tlName && tlToOps[tlName.toLowerCase()]) rawOps = tlToOps[tlName.toLowerCase()];
-            if (!rawOps && agName !== 'Unassigned') rawOps = agentToOps[agName.toLowerCase()] || '';
+        if (!rawOps) {
+            if (tlName && tlName !== 'Unassigned TL' && tlToOps[tlName.toLowerCase()]) {
+                rawOps = tlToOps[tlName.toLowerCase()];
+            }
+            if (!rawOps && agName !== 'Unassigned') {
+                rawOps = agentToOps[agName.toLowerCase()] || '';
+            }
         }
-        let opsName = opsDbNames.has(rawOps.toLowerCase()) ? rawOps : 'Unassigned Ops';
+        let opsName = resolveOpsName(rawOps) || rawOps;
+        if (!opsName || opsName.toLowerCase().includes('unassigned')) {
+            opsName = 'Unassigned Ops';
+        }
+
+        // Auto-create in opsMap if not present
+        if (opsName !== 'Unassigned Ops' && !opsMap[opsName]) {
+            opsMap[opsName] = {
+                name: opsName,
+                mtd: 0,
+                ftd: 0,
+                teams: new Set(),
+                target: getRoleTarget('OPS', opsName) || 0,
+                modeMap: { 'P2P': 0, 'D P2P': 0, 'Vendor': 0 },
+                compMap: { 'Digital Verse': 0, 'World of Crypto': 0 }
+            };
+        }
 
         const modeKey = (mode.toLowerCase().includes('vendor') ? 'Vendor' : (mode.toUpperCase().includes('D') && mode.toUpperCase().includes('P2P') ? 'D P2P' : 'P2P'));
         const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : (comp.toLowerCase().includes('digital') || comp.toLowerCase().includes('dv') ? 'Digital Verse' : (comp || 'Digital Verse'));
@@ -402,15 +430,15 @@ async function load() {
         if (isMtd) agentMap[agName].mtd += inr;
         if (isFtd) agentMap[agName].ftd += inr;
 
-        // TL Sales (Only true TLs from DB)
+        // TL Sales
         if (tlMap[tlName]) {
             if (isMtd) tlMap[tlName].mtd += inr;
             if (isFtd) tlMap[tlName].ftd += inr;
         }
 
-        // Ops Manager Sales (Only true Ops Managers from DB)
+        // Ops Manager Sales
         if (opsMap[opsName]) {
-            if (tlName !== 'Unassigned TL' && tlDbNames.has(tlName.toLowerCase())) opsMap[opsName].teams.add(tlName);
+            if (tlName !== 'Unassigned TL') opsMap[opsName].teams.add(tlName);
             if (isMtd) {
                 opsMap[opsName].mtd += inr;
                 opsMap[opsName].modeMap[modeKey] = (opsMap[opsName].modeMap[modeKey] || 0) + inr;

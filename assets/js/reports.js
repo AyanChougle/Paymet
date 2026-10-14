@@ -137,7 +137,17 @@ function applyFilters() {
         if (from && r.payment_date < from) return false;
         if (to && r.payment_date > to) return false;
         if (mode && (r.payment_mode || '') !== mode) return false;
-        if (comp && !(r.received_in || '').toLowerCase().includes(comp.toLowerCase())) return false;
+        if (comp) {
+            const cLow = comp.toLowerCase();
+            const rLow = (r.received_in || '').toLowerCase();
+            if (cLow.includes('world') || cLow.includes('krypto') || cLow.includes('crypto') || cLow.includes('wk')) {
+                if (!rLow.includes('world') && !rLow.includes('krypto') && !rLow.includes('crypto') && !rLow.includes('wk')) return false;
+            } else if (cLow.includes('digital') || cLow.includes('dv')) {
+                if (!rLow.includes('digital') && !rLow.includes('dv')) return false;
+            } else if (!rLow.includes(cLow)) {
+                return false;
+            }
+        }
 
         if (q) {
             const ecode = r.ecode || getAgentEcode(r.agent_name);
