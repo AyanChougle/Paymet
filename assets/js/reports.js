@@ -112,14 +112,13 @@ function resolveTlName(name) {
 
 async function loadData() {
     try {
-        const [res, opsRes, tlRes] = await Promise.all([
+        const [res, agRes] = await Promise.all([
             api('reports', {}).catch(() => ({ rows: [] })),
-            api('ops_managers', {}).catch(() => ({ opsManagers: [] })),
-            api('team_leaders', {}).catch(() => ({ teamLeaders: [] }))
+            api('agents', {}).catch(() => ({ ops_managers: [], team_leaders: [] }))
         ]);
         allRows = res.rows || [];
-        if (opsRes && opsRes.opsManagers && opsRes.opsManagers.length) cachedOpsManagers = opsRes.opsManagers;
-        if (tlRes && tlRes.teamLeaders && tlRes.teamLeaders.length) cachedTeamLeaders = tlRes.teamLeaders;
+        if (agRes && agRes.ops_managers && agRes.ops_managers.length) cachedOpsManagers = agRes.ops_managers;
+        if (agRes && agRes.team_leaders && agRes.team_leaders.length) cachedTeamLeaders = agRes.team_leaders;
     } catch(e) {
         const res = await api('reports', {}).catch(() => ({ rows: [] }));
         allRows = res.rows || [];
@@ -462,6 +461,9 @@ if (importReportsFile) {
 
                 let count = 0;
                 const nextId = payments.length ? Math.max(...payments.map(p => p.id || 0)) + 1 : 1;
+                const toSyncPayments = [];
+                const toSyncAgents = [];
+                const toSyncClients = [];
 
                 for (const row of extractedRows) {
                     const dbData = {
@@ -588,40 +590,43 @@ if (importReportsFile) {
                         dbData.created_at = dbData.payment_date + ' 12:00:00';
 
                         payments.push(dbData);
+                        toSyncPayments.push(dbData);
                         count++;
 
-                        if (!USE_LOCAL_DB) {
-                            try {
-                                await api('create_payment', dbData);
-                            } catch(e) {
-                                console.error('Cloud insert error:', e);
-                            }
-                        }
-
-                        // Sync Agent to DB
                         if (dbData.agent_name && dbData.agent_name !== 'Unassigned Agent') {
-                            try {
-                                await api('upsert_agent_node', {
-                                    name: dbData.agent_name,
-                                    ecode: dbData.ecode || '',
-                                    ops_manager: dbData.ops_manager || '',
-                                    tl: dbData.tl || ''
-                                });
-                            } catch(e) {}
+                            toSyncAgents.push({
+                                name: dbData.agent_name,
+                                ecode: dbData.ecode || '',
+                                ops_manager: dbData.ops_manager || '',
+                                tl: dbData.tl || ''
+                            });
                         }
 
-                        // Sync Client to DB
                         if (dbData.client_name || dbData.client_number) {
-                            try {
-                                await api('upsert_client_node', {
-                                    client_name: dbData.client_name || 'Unknown Client',
-                                    client_number: dbData.client_number || '',
-                                    email_id: dbData.email_id || '',
-                                    pan_no: dbData.pan_no || '',
-                                    aadhar_no: dbData.aadhar_no || '',
-                                    state: dbData.state || ''
-                                });
-                            } catch(e) {}
+                            toSyncClients.push({
+                                client_name: dbData.client_name || 'Unknown Client',
+                                client_number: dbData.client_number || '',
+                                email_id: dbData.email_id || '',
+                                pan_no: dbData.pan_no || '',
+                                aadhar_no: dbData.aadhar_no || '',
+                                state: dbData.state || ''
+                            });
+                        }
+                    }
+                }
+
+                if (!USE_LOCAL_DB && toSyncPayments.length) {
+                    try {
+                        await api('bulk_import', {
+                            payments: toSyncPayments,
+                            agents: toSyncAgents,
+                            clients: toSyncClients
+                        });
+                    } catch(e) {
+                        console.warn('Bulk import in reports fallback:', e);
+                        for (const p of toSyncPayments) {
+                            try { await api('create_payment', p); } catch(err) {}
+                            await new Promise(r => setTimeout(r, 40));
                         }
                     }
                 }

@@ -390,33 +390,78 @@ async function parseMasterWorkbook(wb, report) {
             }
         }
     } else {
-        const tSheet = impSheet(wb, ['OPS & TL Targets', 'OPS and TL Targets', 'Targets', 'Sheet5', 'Sheet 5']);
-        if (tSheet) {
-            let hdr = -1, nameCols = [];
-            for (let r = 0; r < Math.min(tSheet.rows.length, 30) && hdr < 0; r++) {
-                const cells = (tSheet.rows[r] || []).map(impNorm);
-                cells.forEach((c, i) => {
-                    if (/^(opsmanagername|opsmanagernames|teamleadername|teamleadernames)$/.test(c)) nameCols.push({ i, type: c.startsWith('ops') ? 'OPS' : 'TL' });
-                });
-                if (nameCols.length) hdr = r; else nameCols = [];
+        // A. Check for separate Ops Manager sheet
+        const opsSheet = impSheet(wb, ['Ops Manager', 'Ops Managers', 'OPS', 'Sheet6', 'Sheet 6']);
+        if (opsSheet) {
+            for (let r = 0; r < Math.min(opsSheet.rows.length, 15); r++) {
+                const cells = (opsSheet.rows[r] || []).map(impNorm);
+                if (cells.some(c => c.includes('ops') || c.includes('manager') || c.includes('name')) && cells.some(c => c.includes('target'))) {
+                    const col = makeColMap(opsSheet.rows[r], ['opsmanagername', 'monthlytarget'], ['empid', 'ecode', 'reportinglevel1', 'reportingto', 'name', 'target']);
+                    for (let i = r + 1; i < opsSheet.rows.length; i++) {
+                        const row = opsSheet.rows[i] || [];
+                        const name = impClean(row[col['opsmanagername']] || row[col['name']] || row[2] || '');
+                        if (!name) continue;
+                        const ecode = impClean(row[col['empid']] || row[col['ecode']] || row[1] || '');
+                        const parent = impClean(row[col['reportinglevel1']] || row[col['reportingto']] || row[3] || '');
+                        const target = impNum(row[col['monthlytarget']] || row[col['target']] || row[4]) || 0;
+                        out.ops.push({ name, ecode, parent, target });
+                    }
+                    break;
+                }
             }
-            if (hdr >= 0) {
-                const isSingleGroup = nameCols.length === 1;
-                const lastSr = nameCols.map(() => 0);
-                const section = nameCols.map(() => 0);
-                for (let r = hdr + 1; r < tSheet.rows.length; r++) {
-                    const cells = tSheet.rows[r] || [];
-                    nameCols.forEach((nc, k) => {
-                        const name = impClean(cells[nc.i]);
-                        if (!name) return;
-                        const sr = impNum(cells[nc.i - 2]);
-                        if (sr != null) { if (sr <= lastSr[k]) section[k]++; lastSr[k] = sr; }
-                        const type = isSingleGroup ? (section[k] === 0 ? nc.type : 'TL') : nc.type;
-                        const target = impNum(cells[nc.i + 2]) || 0;
-                        const ecode = impClean(cells[nc.i - 1]);
-                        const parent = impClean(cells[nc.i + 1]);
-                        (type === 'OPS' ? out.ops : out.tls).push({ name, ecode, parent, target });
+        }
+
+        // B. Check for separate Team Leader sheet
+        const tlSheet = impSheet(wb, ['Team Leader', 'Team Leaders', 'TL', 'Sheet5', 'Sheet 5']);
+        if (tlSheet) {
+            for (let r = 0; r < Math.min(tlSheet.rows.length, 15); r++) {
+                const cells = (tlSheet.rows[r] || []).map(impNorm);
+                if (cells.some(c => c.includes('leader') || c.includes('tl') || c.includes('name')) && cells.some(c => c.includes('target'))) {
+                    const col = makeColMap(tlSheet.rows[r], ['teamleadername', 'monthlytarget'], ['empid', 'ecode', 'reportinglevel1', 'reportingto', 'name', 'target']);
+                    for (let i = r + 1; i < tlSheet.rows.length; i++) {
+                        const row = tlSheet.rows[i] || [];
+                        const name = impClean(row[col['teamleadername']] || row[col['name']] || row[2] || '');
+                        if (!name) continue;
+                        const ecode = impClean(row[col['empid']] || row[col['ecode']] || row[1] || '');
+                        const parent = impClean(row[col['reportinglevel1']] || row[col['reportingto']] || row[3] || '');
+                        const target = impNum(row[col['monthlytarget']] || row[col['target']] || row[4]) || 0;
+                        out.tls.push({ name, ecode, parent, target });
+                    }
+                    break;
+                }
+            }
+        }
+
+        // C. If separate sheets were not found, check combined OPS & TL Targets sheet
+        if (out.ops.length === 0 && out.tls.length === 0) {
+            const tSheet = impSheet(wb, ['OPS & TL Targets', 'OPS and TL Targets', 'Targets', 'Sheet5', 'Sheet 5']);
+            if (tSheet) {
+                let hdr = -1, nameCols = [];
+                for (let r = 0; r < Math.min(tSheet.rows.length, 30) && hdr < 0; r++) {
+                    const cells = (tSheet.rows[r] || []).map(impNorm);
+                    cells.forEach((c, i) => {
+                        if (/^(opsmanagername|opsmanagernames|teamleadername|teamleadernames)$/.test(c)) nameCols.push({ i, type: c.startsWith('ops') ? 'OPS' : 'TL' });
                     });
+                    if (nameCols.length) hdr = r; else nameCols = [];
+                }
+                if (hdr >= 0) {
+                    const isSingleGroup = nameCols.length === 1;
+                    const lastSr = nameCols.map(() => 0);
+                    const section = nameCols.map(() => 0);
+                    for (let r = hdr + 1; r < tSheet.rows.length; r++) {
+                        const cells = tSheet.rows[r] || [];
+                        nameCols.forEach((nc, k) => {
+                            const name = impClean(cells[nc.i]);
+                            if (!name) return;
+                            const sr = impNum(cells[nc.i - 2]);
+                            if (sr != null) { if (sr <= lastSr[k]) section[k]++; lastSr[k] = sr; }
+                            const type = isSingleGroup ? (section[k] === 0 ? nc.type : 'TL') : nc.type;
+                            const target = impNum(cells[nc.i + 2]) || 0;
+                            const ecode = impClean(cells[nc.i - 1]);
+                            const parent = impClean(cells[nc.i + 1]);
+                            (type === 'OPS' ? out.ops : out.tls).push({ name, ecode, parent, target });
+                        });
+                    }
                 }
             }
         }
@@ -660,25 +705,60 @@ async function executeMasterImport(wb, sourceLabel) {
 
     if (!confirm(lines.join('\n'))) return false;
 
-    const failures = [];
     let ok = { ops: 0, tls: 0, agents: 0, clients: 0, payments: 0 };
-    const run = async (label, key, action, payload) => {
-        try { await api(action, payload); ok[key]++; }
-        catch (x) { failures.push(`${label}: ${x.message}`); }
-    };
+    const failures = [];
 
-    if (importBtn) importBtn.textContent = 'Saving targets & agents...';
-    for (const o of data.ops) await run(`Ops ${o.name}`, 'ops', 'upsert_ops_node', { name: o.name, ecode: o.ecode, reporting_to: o.parent, target: o.target });
-    for (const t of data.tls) await run(`TL ${t.name}`, 'tls', 'upsert_tl_node', { name: t.name, ecode: t.ecode, ops_manager: t.parent, target: t.target });
-    for (const a of data.agents) await run(`Agent ${a.name}`, 'agents', 'upsert_agent_node', a);
+    if (importBtn) importBtn.textContent = 'Saving master data to database...';
 
-    if (importBtn) importBtn.textContent = 'Saving clients...';
-    for (const c of data.clients) await run(`Client ${c.client_name || c.client_number}`, 'clients', 'upsert_client_node', c);
+    // 1. Primary: Fast, transactional single-connection bulk import
+    let bulkSuccess = false;
+    try {
+        const bulkRes = await api('bulk_import', {
+            ops: data.ops,
+            tls: data.tls,
+            agents: data.agents,
+            clients: data.clients,
+            payments: fresh
+        });
 
-    let n = 0;
-    for (const p of fresh) {
-        if (importBtn) importBtn.textContent = `Saving payments ${++n}/${fresh.length}...`;
-        await run(`Payment ${p.payment_date} ${p.agent_name}`, 'payments', 'create_payment', p);
+        if (bulkRes && bulkRes.saved) {
+            ok = bulkRes.saved;
+            bulkSuccess = true;
+        }
+        if (bulkRes && bulkRes.errors && bulkRes.errors.length) {
+            failures.push(...bulkRes.errors);
+        }
+    } catch (bulkErr) {
+        console.warn('Bulk import failed, attempting sequential fallback with safe delay:', bulkErr);
+        bulkSuccess = false;
+    }
+
+    // 2. Fallback: Sequential execution with 50ms delay to prevent MySQL connection exhaustion
+    if (!bulkSuccess) {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const run = async (label, key, action, payload) => {
+            try { 
+                await api(action, payload); 
+                ok[key]++; 
+            } catch (x) { 
+                failures.push(`${label}: ${x.message}`); 
+            }
+            await sleep(50);
+        };
+
+        if (importBtn) importBtn.textContent = 'Saving targets & agents...';
+        for (const o of data.ops) await run(`Ops ${o.name}`, 'ops', 'upsert_ops_node', { name: o.name, ecode: o.ecode, reporting_to: o.parent, target: o.target });
+        for (const t of data.tls) await run(`TL ${t.name}`, 'tls', 'upsert_tl_node', { name: t.name, ecode: t.ecode, ops_manager: t.parent, target: t.target });
+        for (const a of data.agents) await run(`Agent ${a.name}`, 'agents', 'upsert_agent_node', a);
+
+        if (importBtn) importBtn.textContent = 'Saving clients...';
+        for (const c of data.clients) await run(`Client ${c.client_name || c.client_number}`, 'clients', 'upsert_client_node', c);
+
+        let n = 0;
+        for (const p of fresh) {
+            if (importBtn) importBtn.textContent = `Saving payments ${++n}/${fresh.length}...`;
+            await run(`Payment ${p.payment_date} ${p.agent_name}`, 'payments', 'create_payment', p);
+        }
     }
 
     // Refresh authoritative caches in localStorage
