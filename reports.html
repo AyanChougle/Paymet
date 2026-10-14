@@ -35,8 +35,8 @@
                 <h1>Payment Reports (Payment Sheet)</h1>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
-                <input type="file" id="importReportsFile" accept=".xlsx, .xls" style="display:none;">
-                <button class="primary" onclick="document.getElementById('importReportsFile').click()">Import Payment Sheet (.xlsx)</button>
+                <input type="file" id="importReportsFile" accept=".xlsx, .xls, .csv, .txt" style="display:none;">
+                <button class="primary" onclick="document.getElementById('importReportsFile').click()">Import Payment Sheet (.xlsx, .csv)</button>
                 <button id="exportExcelBtn" class="btn-excel">Export Excel (.xlsx)</button>
             </div>
         </header>
@@ -60,6 +60,7 @@
                     <option value="">All Modes</option>
                     <option value="P2P">P2P</option>
                     <option value="D P2P">D P2P</option>
+                    <option value="Vendor">Vendor</option>
                 </select>
             </label>
             <label>
@@ -98,6 +99,7 @@
                             <th>Received Company</th>
                             <th>Entered By</th>
                             <th>Entry Time</th>
+                            <th style="min-width:70px;">Action</th>
                         </tr>
                     </thead>
                     <tbody id="reportTableBody"></tbody>
@@ -124,8 +126,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=10"></script>
-    <script src="assets/js/auth.js?v=10"></script>
-    <script src="assets/js/reports.js?v=10"></script>
+    <script src="assets/js/api.js?v=15"></script>
+    <script src="assets/js/auth.js?v=15"></script>
+    <script src="assets/js/reports.js?v=15"></script>
 </body>
 </html>

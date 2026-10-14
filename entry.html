@@ -125,6 +125,7 @@
                 <select name="payment_mode">
                     <option value="P2P">P2P</option>
                     <option value="D P2P">D P2P</option>
+                    <option value="Vendor">Vendor</option>
                 </select>
             </label>
             <label>
@@ -141,10 +142,11 @@
             </label>
             <label>
                 Received In Company
-                <select name="received_in">
-                    <option value="Digital Verse">Digital Verse</option>
-                    <option value="World of Crypto">World of Crypto</option>
-                </select>
+                <input name="received_in" list="companyList" placeholder="Select or type company" value="Digital Verse" required>
+                <datalist id="companyList">
+                    <option value="Digital Verse"></option>
+                    <option value="World of Crypto"></option>
+                </datalist>
             </label>
             <label class="wide">
                 Reference / Remarks

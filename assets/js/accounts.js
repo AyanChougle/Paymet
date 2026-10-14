@@ -24,6 +24,11 @@ async function getLedgerData() {
 }
 
 async function render() {
+    const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+    if (!user || String(user.role || '').toUpperCase() !== 'ADMIN') {
+        return;
+    }
+
     const [dashRes, ledger] = await Promise.all([
         api('dashboard', {}).catch(() => ({ rawPayments: [] })),
         getLedgerData()

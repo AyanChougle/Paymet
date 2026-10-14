@@ -132,22 +132,67 @@ async function load() {
         lastEntryBadge.innerHTML = `Last Entry: <strong>${entryTime}</strong> by <span style="color:var(--accent); font-weight:700;">${entryBy}</span> (${fmtInr(lastEntry.inr_amount)})`;
     }
 
-    // Helper to resolve Ops Manager names cleanly
-    function resolveOpsName(name) {
+    // Helpers to resolve Ops Manager and TL names cleanly to canonical DB names
+    function resolveCanonicalName(name, candidateList) {
         if (!name) return '';
-        const clean = name.trim().toLowerCase();
-        for (const op of dbOps) {
-            const opClean = (op.name || '').trim().toLowerCase();
-            if (opClean === clean) return op.name.trim();
-            const firstA = clean.split(' ')[0];
-            const lastA = clean.split(' ').pop();
-            const firstB = opClean.split(' ')[0];
-            const lastB = opClean.split(' ').pop();
-            if (firstA === firstB && lastA === lastB && firstA.length >= 3) {
-                return op.name.trim();
+        const raw = String(name).replace(/[\u00A0\u200B\u200E\u200F]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!raw) return '';
+        const clean = raw.toLowerCase();
+        if (clean.includes('unassigned')) return '';
+
+        // 1. Exact match
+        for (const c of candidateList) {
+            const cName = (c.name || '').trim();
+            if (cName.toLowerCase() === clean) return cName;
+        }
+
+        // 2. Token / word matching
+        const inTokens = clean.split(/[\s,.-]+/).filter(Boolean);
+        if (!inTokens.length) return raw;
+
+        const inFirst = inTokens[0];
+        const inLast = inTokens.length > 1 ? inTokens[inTokens.length - 1] : null;
+
+        let candidate = null;
+        for (const c of candidateList) {
+            const cName = (c.name || '').trim();
+            const cTokens = cName.toLowerCase().split(/[\s,.-]+/).filter(Boolean);
+            const cFirst = cTokens[0];
+            const cLast = cTokens.length > 1 ? cTokens[cTokens.length - 1] : null;
+
+            if (!inLast) {
+                if (cFirst === inFirst) {
+                    if (candidate && candidate !== cName) { candidate = null; break; }
+                    candidate = cName;
+                }
+            } else {
+                if (cFirst === inFirst && cLast === inLast) return cName;
+                if (cTokens.every(t => inTokens.includes(t))) return cName;
+                if (inTokens.every(t => cTokens.includes(t))) return cName;
             }
         }
-        return name.trim();
+        if (candidate) return candidate;
+
+        // 3. Fallback: startsWith / contains
+        for (const c of candidateList) {
+            const cName = (c.name || '').trim();
+            const cLow = cName.toLowerCase();
+            if (cLow.startsWith(clean) || clean.startsWith(cLow)) return cName;
+        }
+
+        return raw;
+    }
+
+    function resolveOpsName(name) {
+        if (!name) return '';
+        if (String(name).toLowerCase().includes('unassigned')) return 'Unassigned Ops';
+        return resolveCanonicalName(name, dbOps) || String(name).trim();
+    }
+
+    function resolveTlName(name) {
+        if (!name) return '';
+        if (String(name).toLowerCase().includes('unassigned')) return 'Unassigned TL';
+        return resolveCanonicalName(name, dbTls) || String(name).trim();
     }
 
     // Populate months in dropdown if needed
@@ -256,17 +301,18 @@ async function load() {
     dbTls.forEach(t => {
         const name = (t.name || '').trim();
         if (name) {
-            tlDbNames.add(name.toLowerCase());
-            const resolvedOps = resolveOpsName(t.ops_manager || t.reporting_to || '');
-            tlMap[name] = {
-                name: name,
+            const canonicalName = resolveTlName(name);
+            tlDbNames.add(canonicalName.toLowerCase());
+            const resolvedOps = resolveOpsName(t.ops_manager || t.reporting_to || t.reporting_level_1 || '');
+            tlMap[canonicalName] = {
+                name: canonicalName,
                 mtd: 0,
                 ftd: 0,
                 opsManager: resolvedOps,
-                target: parseFloat(t.monthly_target || getRoleTarget('TL', name) || 0)
+                target: parseFloat(t.monthly_target || t.target || getRoleTarget('TL', canonicalName) || 0)
             };
             if (resolvedOps && opsMap[resolvedOps]) {
-                opsMap[resolvedOps].teams.add(name);
+                opsMap[resolvedOps].teams.add(canonicalName);
             }
         }
     });
@@ -278,18 +324,19 @@ async function load() {
 
     dbTls.forEach(t => {
         if (t.name) {
-            const resolvedOps = resolveOpsName(t.ops_manager || t.reporting_to || '');
-            if (resolvedOps) tlToOps[t.name.toLowerCase().trim()] = resolvedOps;
+            const tlName = resolveTlName(t.name);
+            const resolvedOps = resolveOpsName(t.ops_manager || t.reporting_to || t.reporting_level_1 || '');
+            if (resolvedOps) tlToOps[tlName.toLowerCase()] = resolvedOps;
         }
     });
 
     dbAgents.forEach(a => {
-        const agName = (a.agent_name || '').toLowerCase().trim();
+        const agName = (a.agent_name || a.name || '').toLowerCase().trim();
         if (agName) {
-            if (a.tl) agentToTl[agName] = a.tl.trim();
+            if (a.tl || a.team_leader) agentToTl[agName] = resolveTlName(a.tl || a.team_leader);
             if (a.ops_manager) agentToOps[agName] = resolveOpsName(a.ops_manager);
 
-            const realName = (a.agent_name || '').trim();
+            const realName = (a.agent_name || a.name || '').trim();
             if (!agentMap[realName]) {
                 agentMap[realName] = { name: realName, mtd: 0, ftd: 0 };
             }
@@ -314,7 +361,13 @@ async function load() {
         if (!rawTl && agName !== 'Unassigned') {
             rawTl = agentToTl[agName.toLowerCase()] || '';
         }
-        let tlName = tlDbNames.has(rawTl.toLowerCase()) ? rawTl : (agentToTl[agName.toLowerCase()] || rawTl || 'Unassigned TL');
+        let tlName = resolveTlName(rawTl);
+        if (!tlDbNames.has(tlName.toLowerCase()) && agentToTl[agName.toLowerCase()]) {
+            tlName = resolveTlName(agentToTl[agName.toLowerCase()]);
+        }
+        if (!tlDbNames.has(tlName.toLowerCase())) {
+            tlName = rawTl || 'Unassigned TL';
+        }
 
         // Resolve Ops Manager
         let rawOps = (p.ops_manager || '').trim();
@@ -325,8 +378,8 @@ async function load() {
         }
         let opsName = opsDbNames.has(rawOps.toLowerCase()) ? rawOps : 'Unassigned Ops';
 
-        const modeKey = mode.toUpperCase().includes('D') ? 'D P2P' : 'P2P';
-        const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
+        const modeKey = (mode.toLowerCase().includes('vendor') ? 'Vendor' : (mode.toUpperCase().includes('D') && mode.toUpperCase().includes('P2P') ? 'D P2P' : 'P2P'));
+        const compKey = comp.toLowerCase().includes('world') || comp.toLowerCase().includes('wk') ? 'World of Crypto' : (comp.toLowerCase().includes('digital') || comp.toLowerCase().includes('dv') ? 'Digital Verse' : (comp || 'Digital Verse'));
 
         if (isMtd) {
             totalInr += inr;
@@ -372,11 +425,19 @@ async function load() {
     document.getElementById('kpiInrSub').textContent = `${totalTx} transactions`;
     document.getElementById('kpiUsdt').textContent = fmtUsdt(totalUsdt) + ' USDT';
     
-    document.getElementById('kpiModes').textContent = `${fmtUsdt(modeMap['D P2P'].usdt)} / ${fmtUsdt(modeMap['P2P'].usdt)}`;
-    document.getElementById('kpiModesSub').textContent = `Direct: ${fmtInrInt(modeMap['D P2P'].inr)} | P2P: ${fmtInrInt(modeMap['P2P'].inr)}`;
+    const dP2pUsdt = modeMap['D P2P'] ? modeMap['D P2P'].usdt : 0;
+    const p2pUsdt = modeMap['P2P'] ? modeMap['P2P'].usdt : 0;
+    const dP2pInr = modeMap['D P2P'] ? modeMap['D P2P'].inr : 0;
+    const p2pInr = modeMap['P2P'] ? modeMap['P2P'].inr : 0;
+    document.getElementById('kpiModes').textContent = `${fmtUsdt(dP2pUsdt)} / ${fmtUsdt(p2pUsdt)}`;
+    document.getElementById('kpiModesSub').textContent = `Direct: ${fmtInrInt(dP2pInr)} | P2P: ${fmtInrInt(p2pInr)}`;
 
-    document.getElementById('kpiCompany').textContent = `${fmtInrInt(compMap['Digital Verse'].inr)} / ${fmtInrInt(compMap['World of Crypto'].inr)}`;
-    document.getElementById('kpiCompanySub').textContent = `DV: ${fmtUsdt(compMap['Digital Verse'].usdt)} U | WK: ${fmtUsdt(compMap['World of Crypto'].usdt)} U`;
+    const dvInr = compMap['Digital Verse'] ? compMap['Digital Verse'].inr : 0;
+    const wkInr = compMap['World of Crypto'] ? compMap['World of Crypto'].inr : 0;
+    const dvUsdt = compMap['Digital Verse'] ? compMap['Digital Verse'].usdt : 0;
+    const wkUsdt = compMap['World of Crypto'] ? compMap['World of Crypto'].usdt : 0;
+    document.getElementById('kpiCompany').textContent = `${fmtInrInt(dvInr)} / ${fmtInrInt(wkInr)}`;
+    document.getElementById('kpiCompanySub').textContent = `DV: ${fmtUsdt(dvUsdt)} U | WK: ${fmtUsdt(wkUsdt)} U`;
 
     function renderTargetStatus(sales, target) {
         if (!target || target <= 0) {

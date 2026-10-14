@@ -80,22 +80,66 @@ function getRoleTarget(type, name) {
     return found && found.target ? parseFloat(found.target) : 0;
 }
 
-function resolveOpsName(name) {
+function resolveCanonicalName(name, candidateList) {
     if (!name) return '';
-    const clean = name.trim().toLowerCase();
-    if (clean.includes('unassigned')) return 'Unassigned Ops Manager';
-    for (const op of cachedOpsManagers) {
-        const opClean = (op.name || '').trim().toLowerCase();
-        if (opClean === clean) return op.name.trim();
-        const firstA = clean.split(' ')[0];
-        const lastA = clean.split(' ').pop();
-        const firstB = opClean.split(' ')[0];
-        const lastB = opClean.split(' ').pop();
-        if (firstA === firstB && lastA === lastB && firstA.length >= 3) {
-            return op.name.trim();
+    const raw = String(name).replace(/[\u00A0\u200B\u200E\u200F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    const clean = raw.toLowerCase();
+    if (clean.includes('unassigned')) return '';
+
+    // 1. Exact match
+    for (const c of candidateList) {
+        const cName = (c.name || '').trim();
+        if (cName.toLowerCase() === clean) return cName;
+    }
+
+    // 2. Token / word matching
+    const inTokens = clean.split(/[\s,.-]+/).filter(Boolean);
+    if (!inTokens.length) return raw;
+
+    const inFirst = inTokens[0];
+    const inLast = inTokens.length > 1 ? inTokens[inTokens.length - 1] : null;
+
+    let candidate = null;
+    for (const c of candidateList) {
+        const cName = (c.name || '').trim();
+        const cTokens = cName.toLowerCase().split(/[\s,.-]+/).filter(Boolean);
+        const cFirst = cTokens[0];
+        const cLast = cTokens.length > 1 ? cTokens[cTokens.length - 1] : null;
+
+        if (!inLast) {
+            if (cFirst === inFirst) {
+                if (candidate && candidate !== cName) { candidate = null; break; }
+                candidate = cName;
+            }
+        } else {
+            if (cFirst === inFirst && cLast === inLast) return cName;
+            if (cTokens.every(t => inTokens.includes(t))) return cName;
+            if (inTokens.every(t => cTokens.includes(t))) return cName;
         }
     }
-    return name.trim();
+    if (candidate) return candidate;
+
+    // 3. Fallback: startsWith / contains
+    for (const c of candidateList) {
+        const cName = (c.name || '').trim();
+        const cLow = cName.toLowerCase();
+        if (cLow.startsWith(clean) || clean.startsWith(cLow)) return cName;
+    }
+
+    return raw;
+}
+
+function resolveOpsName(name) {
+    if (!name) return '';
+    if (String(name).toLowerCase().includes('unassigned')) return 'Unassigned Ops Manager';
+    return resolveCanonicalName(name, cachedOpsManagers) || String(name).trim();
+}
+
+function resolveTlName(name) {
+    if (!name) return '';
+    if (String(name).toLowerCase().includes('unassigned')) return 'Unassigned TL';
+    return resolveCanonicalName(name, cachedTeamLeaders) || String(name).trim();
 }
 
 async function setRoleTarget(type, name, targetVal) {
@@ -171,7 +215,7 @@ window.onDesignationChange = function() {
 
     if (des === 'OPS') {
         grpOps.style.display = 'none';
-        grpTl.querySelector('input').placeholder = 'e.g. Akash T (Reporting Level 1)';
+        grpTl.querySelector('input').placeholder = 'Enter Reporting Manager (Level 1)';
         grpTl.querySelector('input').previousSibling.textContent = 'Reporting Level 1 (VP / Head)';
         grpTarget.style.display = 'flex';
     } else if (des === 'TL') {
@@ -242,7 +286,7 @@ async function loadData() {
             ecode: a.ecode || a.emp_id || '',
             agent_name: (a.agent_name || a.name || '').trim(),
             ops_manager: resolveOpsName(a.ops_manager || ''),
-            tl: (a.tl || a.team_leader || '').trim()
+            tl: resolveTlName(a.tl || a.team_leader || '')
         }));
     } else if (!apiSucceeded) {
         mappings = getMappings();
@@ -256,7 +300,7 @@ async function loadData() {
                         ecode: p.ecode || '',
                         agent_name: name,
                         ops_manager: resolveOpsName(p.ops_manager || ''),
-                        tl: p.tl || ''
+                        tl: resolveTlName(p.tl || '')
                     });
                     known.add(name.toLowerCase());
                 }
@@ -266,10 +310,11 @@ async function loadData() {
 
     // 2. Auto-align missing or unassigned Ops Managers from TL parentage
     mappings.forEach(m => {
+        if (m.tl) m.tl = resolveTlName(m.tl);
         if (m.tl && (!m.ops_manager || m.ops_manager.toLowerCase().includes('unassigned'))) {
-            const tlObj = cachedTeamLeaders.find(t => (t.name || '').toLowerCase() === m.tl.trim().toLowerCase());
+            const tlObj = cachedTeamLeaders.find(t => resolveTlName(t.name).toLowerCase() === m.tl.trim().toLowerCase());
             if (tlObj) {
-                const tlOps = resolveOpsName(tlObj.ops_manager || tlObj.reporting_to || '');
+                const tlOps = resolveOpsName(tlObj.ops_manager || tlObj.reporting_to || tlObj.reporting_level_1 || '');
                 if (tlOps) {
                     m.ops_manager = tlOps;
                 }
@@ -361,29 +406,47 @@ function renderOpsHierarchy(mappings) {
     cachedOpsManagers.forEach(op => {
         const name = (op.name || '').trim();
         if (name) {
-            opsGroups[name] = {
-                ecode: op.ecode || '-',
-                name: name,
-                reporting_to: op.reporting_to || '-',
-                target: getRoleTarget('OPS', name) || parseFloat(op.monthly_target || op.target || 0),
-                totalSales: 0,
-                totalTx: 0,
-                tls: {}
-            };
+            const canonicalName = resolveOpsName(name);
+            const ec = op.ecode || op.emp_id || '';
+            const rep = op.reporting_to || op.reporting_level_1 || '';
+            const tgt = getRoleTarget('OPS', canonicalName) || parseFloat(op.monthly_target || op.target || 0);
+
+            if (!opsGroups[canonicalName]) {
+                opsGroups[canonicalName] = {
+                    ecode: ec || '-',
+                    name: canonicalName,
+                    reporting_to: rep || '-',
+                    target: tgt,
+                    totalSales: 0,
+                    totalTx: 0,
+                    tls: {}
+                };
+            } else {
+                if ((!opsGroups[canonicalName].ecode || opsGroups[canonicalName].ecode === '-') && ec) {
+                    opsGroups[canonicalName].ecode = ec;
+                }
+                if ((!opsGroups[canonicalName].reporting_to || opsGroups[canonicalName].reporting_to === '-') && rep) {
+                    opsGroups[canonicalName].reporting_to = rep;
+                }
+                if ((!opsGroups[canonicalName].target || opsGroups[canonicalName].target === 0) && tgt > 0) {
+                    opsGroups[canonicalName].target = tgt;
+                }
+            }
         }
     });
 
     // Populate agents and TLs under Ops Managers
     mappings.forEach(m => {
         let ops = resolveOpsName(m.ops_manager || '') || 'Unassigned Ops Manager';
-        const tl = (m.tl || '').trim() || 'Direct / Unassigned TL';
+        const tl = resolveTlName(m.tl || '') || 'Direct / Unassigned TL';
 
         if (!opsGroups[ops]) {
+            const opObj = cachedOpsManagers.find(o => resolveOpsName(o.name) === ops);
             opsGroups[ops] = {
-                ecode: '-',
+                ecode: opObj ? (opObj.ecode || opObj.emp_id || '-') : '-',
                 name: ops,
-                reporting_to: '-',
-                target: getRoleTarget('OPS', ops === 'Unassigned Ops Manager' ? '' : ops),
+                reporting_to: opObj ? (opObj.reporting_to || opObj.reporting_level_1 || '-') : '-',
+                target: getRoleTarget('OPS', ops === 'Unassigned Ops Manager' ? '' : ops) || (opObj ? parseFloat(opObj.monthly_target || opObj.target || 0) : 0),
                 totalSales: 0,
                 totalTx: 0,
                 tls: {}
@@ -391,9 +454,11 @@ function renderOpsHierarchy(mappings) {
         }
 
         if (!opsGroups[ops].tls[tl]) {
+            const tlObj = cachedTeamLeaders.find(t => resolveTlName(t.name) === tl);
             opsGroups[ops].tls[tl] = {
+                ecode: tlObj ? (tlObj.ecode || tlObj.emp_id || '-') : '-',
                 name: tl,
-                target: getRoleTarget('TL', tl === 'Direct / Unassigned TL' ? '' : tl),
+                target: getRoleTarget('TL', tl === 'Direct / Unassigned TL' ? '' : tl) || (tlObj ? parseFloat(tlObj.monthly_target || tlObj.target || 0) : 0),
                 totalSales: 0,
                 totalTx: 0,
                 agents: []
@@ -409,17 +474,20 @@ function renderOpsHierarchy(mappings) {
 
     // Ensure all configured TLs assigned to this Ops are visible
     cachedTeamLeaders.forEach(t => {
-        const opName = resolveOpsName(t.ops_manager || t.reporting_to || '');
-        const tlName = (t.name || '').trim();
+        const opName = resolveOpsName(t.ops_manager || t.reporting_to || t.reporting_level_1 || '');
+        const tlName = resolveTlName(t.name);
         if (opName && opsGroups[opName]) {
             if (!opsGroups[opName].tls[tlName]) {
                 opsGroups[opName].tls[tlName] = {
+                    ecode: t.ecode || t.emp_id || '-',
                     name: tlName,
                     target: getRoleTarget('TL', tlName) || parseFloat(t.target || t.monthly_target || 0),
                     totalSales: 0,
                     totalTx: 0,
                     agents: []
                 };
+            } else if (!opsGroups[opName].tls[tlName].ecode || opsGroups[opName].tls[tlName].ecode === '-') {
+                opsGroups[opName].tls[tlName].ecode = t.ecode || t.emp_id || '-';
             }
         }
     });
@@ -518,28 +586,46 @@ function renderTlHierarchy(mappings) {
     cachedTeamLeaders.forEach(t => {
         const name = (t.name || '').trim();
         if (name) {
-            tlGroups[name] = {
-                ecode: t.ecode || '-',
-                name: name,
-                opsManager: resolveOpsName(t.ops_manager || t.reporting_to || '') || 'Unassigned Ops',
-                target: getRoleTarget('TL', name) || parseFloat(t.monthly_target || t.target || 0),
-                totalSales: 0,
-                totalTx: 0,
-                agents: []
-            };
+            const canonicalName = resolveTlName(name);
+            const ec = t.ecode || t.emp_id || '';
+            const opsM = resolveOpsName(t.ops_manager || t.reporting_to || t.reporting_level_1 || '') || 'Unassigned Ops';
+            const tgt = getRoleTarget('TL', canonicalName) || parseFloat(t.monthly_target || t.target || 0);
+
+            if (!tlGroups[canonicalName]) {
+                tlGroups[canonicalName] = {
+                    ecode: ec || '-',
+                    name: canonicalName,
+                    opsManager: opsM,
+                    target: tgt,
+                    totalSales: 0,
+                    totalTx: 0,
+                    agents: []
+                };
+            } else {
+                if ((!tlGroups[canonicalName].ecode || tlGroups[canonicalName].ecode === '-') && ec) {
+                    tlGroups[canonicalName].ecode = ec;
+                }
+                if ((!tlGroups[canonicalName].opsManager || tlGroups[canonicalName].opsManager === 'Unassigned Ops') && opsM !== 'Unassigned Ops') {
+                    tlGroups[canonicalName].opsManager = opsM;
+                }
+                if ((!tlGroups[canonicalName].target || tlGroups[canonicalName].target === 0) && tgt > 0) {
+                    tlGroups[canonicalName].target = tgt;
+                }
+            }
         }
     });
 
     mappings.forEach(m => {
-        const tl = (m.tl || '').trim() || 'Unassigned TL';
+        const tl = resolveTlName(m.tl || '') || 'Unassigned TL';
         const ops = resolveOpsName(m.ops_manager || '') || 'Unassigned Ops';
 
         if (!tlGroups[tl]) {
+            const tlObj = cachedTeamLeaders.find(t => resolveTlName(t.name) === tl);
             tlGroups[tl] = {
-                ecode: '-',
+                ecode: tlObj ? (tlObj.ecode || tlObj.emp_id || '-') : '-',
                 name: tl,
                 opsManager: ops,
-                target: getRoleTarget('TL', tl === 'Unassigned TL' ? '' : tl),
+                target: getRoleTarget('TL', tl === 'Unassigned TL' ? '' : tl) || (tlObj ? parseFloat(tlObj.monthly_target || tlObj.target || 0) : 0),
                 totalSales: 0,
                 totalTx: 0,
                 agents: []

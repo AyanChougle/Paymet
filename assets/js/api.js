@@ -46,6 +46,9 @@ async function api(action, data = {}) {
     }
     
     if (!j.success) {
+        if (r.status === 403) {
+            console.warn(`[403 Forbidden] Action '${action}' was rejected:`, j.message || 'Insufficient permissions for current role.');
+        }
         throw new Error(j.message || 'API request failed');
     }
     return j;

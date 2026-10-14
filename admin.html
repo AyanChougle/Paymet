@@ -14,7 +14,8 @@
         <div class="brand">PAYMENT<span>PORTAL</span></div>
         <nav>
             <a href="dashboard.html">Dashboard</a>
-            <a href="revenue.html">Revenue Overview</a>`n            <a href="entry.html">Payment Entry</a>
+            <a href="revenue.html">Revenue Overview</a>
+            <a href="entry.html">Payment Entry</a>
             <a href="reports.html">Payment Reports</a>
             <a href="agents.html">Agents</a>
             <a href="clients.html">Clients</a>
@@ -56,10 +57,19 @@
                 </div>
             </div>
             <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
-                <input type="file" id="importFile" accept=".xlsx, .xls" style="flex: 1; min-width: 200px; padding: 8px; background: var(--bg-lighter); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
-                <button id="importBtn" class="primary" style="white-space: nowrap;">Import Master Spreadsheet</button>
+                <input type="file" id="importFile" accept=".xlsx, .xls, .csv, .txt" style="flex: 1; min-width: 200px; padding: 8px; background: var(--bg-lighter); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                <button id="importBtn" class="primary" style="white-space: nowrap;">Import Master File</button>
                 <button id="clearAllBtn" class="danger" style="white-space: nowrap;">Wipe All Records</button>
             </div>
+            <details style="margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px;">
+                <summary style="font-size: 12px; color: var(--text-muted); cursor: pointer; font-weight: 600;">Or Paste CSV / Raw Text Directly</summary>
+                <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+                    <textarea id="pasteDataInput" placeholder="Paste your raw CSV or multi-table text here..." style="width: 100%; height: 120px; padding: 8px; font-family: var(--font-mono); font-size: 11px; background: var(--bg-lighter); border: 1px solid var(--border); border-radius: 4px; color: var(--text);"></textarea>
+                    <div>
+                        <button id="importPasteBtn" class="ghost" style="padding: 6px 14px; font-size: 12px;">Import Pasted Text</button>
+                    </div>
+                </div>
+            </details>
         </section>
 
         <!-- Target Management for OPS and TL (Admin Only) -->
@@ -113,8 +123,8 @@
                 <h2>Create System User</h2>
             </div>
             <form id="userForm" class="form-grid" autocomplete="off">
-                <label>User Full Name<input name="name" placeholder="e.g. John Doe" autocomplete="off" required></label>
-                <label>Email Address<input name="email" type="email" placeholder="user@company.com" autocomplete="off" required></label>
+                <label>User Full Name<input name="name" placeholder="Enter Full Name" autocomplete="off" required></label>
+                <label>Email Address<input name="email" type="email" placeholder="Enter Email Address" autocomplete="off" required></label>
                 <label>Password<input name="password" type="password" placeholder="Enter password" autocomplete="new-password" required></label>
                 <label>Role
                     <select name="role">
@@ -152,8 +162,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=10"></script>
-    <script src="assets/js/auth.js?v=10"></script>
-    <script src="assets/js/admin.js?v=12"></script>
+    <script src="assets/js/api.js?v=15"></script>
+    <script src="assets/js/auth.js?v=15"></script>
+    <script src="assets/js/admin.js?v=15"></script>
 </body>
 </html>

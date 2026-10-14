@@ -45,9 +45,85 @@ function getAgentOps(agentName) {
     return found && found.ops_manager ? found.ops_manager : '-';
 }
 
+let cachedOpsManagers = JSON.parse(localStorage.getItem('pp_ops_managers') || '[]');
+let cachedTeamLeaders = JSON.parse(localStorage.getItem('pp_team_leaders') || '[]');
+
+function resolveCanonicalName(name, candidateList) {
+    if (!name) return '';
+    const raw = String(name).replace(/[\u00A0\u200B\u200E\u200F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    const clean = raw.toLowerCase();
+    if (clean.includes('unassigned')) return '';
+
+    // 1. Exact match
+    for (const c of candidateList) {
+        const cName = (c.name || '').trim();
+        if (cName.toLowerCase() === clean) return cName;
+    }
+
+    // 2. Token / word matching
+    const inTokens = clean.split(/[\s,.-]+/).filter(Boolean);
+    if (!inTokens.length) return raw;
+
+    const inFirst = inTokens[0];
+    const inLast = inTokens.length > 1 ? inTokens[inTokens.length - 1] : null;
+
+    let candidate = null;
+    for (const c of candidateList) {
+        const cName = (c.name || '').trim();
+        const cTokens = cName.toLowerCase().split(/[\s,.-]+/).filter(Boolean);
+        const cFirst = cTokens[0];
+        const cLast = cTokens.length > 1 ? cTokens[cTokens.length - 1] : null;
+
+        if (!inLast) {
+            if (cFirst === inFirst) {
+                if (candidate && candidate !== cName) { candidate = null; break; }
+                candidate = cName;
+            }
+        } else {
+            if (cFirst === inFirst && cLast === inLast) return cName;
+            if (cTokens.every(t => inTokens.includes(t))) return cName;
+            if (inTokens.every(t => cTokens.includes(t))) return cName;
+        }
+    }
+    if (candidate) return candidate;
+
+    // 3. Fallback: startsWith / contains
+    for (const c of candidateList) {
+        const cName = (c.name || '').trim();
+        const cLow = cName.toLowerCase();
+        if (cLow.startsWith(clean) || clean.startsWith(cLow)) return cName;
+    }
+
+    return raw;
+}
+
+function resolveOpsName(name) {
+    if (!name) return '';
+    if (String(name).toLowerCase().includes('unassigned')) return 'Unassigned Ops Manager';
+    return resolveCanonicalName(name, cachedOpsManagers) || String(name).trim();
+}
+
+function resolveTlName(name) {
+    if (!name) return '';
+    if (String(name).toLowerCase().includes('unassigned')) return 'Unassigned TL';
+    return resolveCanonicalName(name, cachedTeamLeaders) || String(name).trim();
+}
+
 async function loadData() {
-    const res = await api('reports', {});
-    allRows = res.rows || [];
+    try {
+        const [res, opsRes, tlRes] = await Promise.all([
+            api('reports', {}).catch(() => ({ rows: [] })),
+            api('ops_managers', {}).catch(() => ({ opsManagers: [] })),
+            api('team_leaders', {}).catch(() => ({ teamLeaders: [] }))
+        ]);
+        allRows = res.rows || [];
+        if (opsRes && opsRes.opsManagers && opsRes.opsManagers.length) cachedOpsManagers = opsRes.opsManagers;
+        if (tlRes && tlRes.teamLeaders && tlRes.teamLeaders.length) cachedTeamLeaders = tlRes.teamLeaders;
+    } catch(e) {
+        const res = await api('reports', {}).catch(() => ({ rows: [] }));
+        allRows = res.rows || [];
+    }
     applyFilters();
 }
 
@@ -113,15 +189,22 @@ function renderTable() {
     nextPageBtn.disabled = currentPage >= totalPages;
 
     if (pageRows.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="19" class="text-muted" style="text-align:center; padding:30px;">No payments found matching filter criteria.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="20" class="text-muted" style="text-align:center; padding:30px;">No payments found matching filter criteria.</td></tr>';
         return;
     }
+
+    const curUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+    const rawRole = (curUser && curUser.role ? curUser.role.toUpperCase().trim() : 'ENTRY_USER');
+    const canDelete = (rawRole === 'ADMIN' || rawRole === 'OPS_MANAGER');
 
     tableBody.innerHTML = pageRows.map((r, i) => {
         const ecode = escapeHtml(r.ecode || getAgentEcode(r.agent_name));
         const ops = escapeHtml(r.ops_manager || getAgentOps(r.agent_name));
         const enteredBy = r.created_by_name ? `<strong>${escapeHtml(r.created_by_name)}</strong>` : '<span style="color:var(--text-dim);">-</span>';
         const entryTime = r.created_at ? `<span style="font-size:11px; color:var(--text-muted);">${escapeHtml(r.created_at)}</span>` : '-';
+        const actionHtml = canDelete && r.id 
+            ? `<button class="ghost danger" style="padding:3px 8px; font-size:11px; border-radius:4px;" onclick="deletePaymentRecord(${r.id})">Delete</button>` 
+            : '<span style="color:var(--text-dim);">-</span>';
 
         return `<tr>
             <td style="color:var(--text-muted);">${startIdx + i + 1}</td>
@@ -143,9 +226,29 @@ function renderTable() {
             <td>${escapeHtml(r.received_in || '-')}</td>
             <td>${enteredBy}</td>
             <td>${entryTime}</td>
+            <td style="text-align:center;">${actionHtml}</td>
         </tr>`;
     }).join('');
 }
+
+window.deletePaymentRecord = async function(id) {
+    if (!id) return;
+    if (!confirm(`Are you sure you want to permanently delete payment record #${id}?`)) return;
+
+    try {
+        const res = await api('delete_payment', { id });
+        if (res.error) throw new Error(res.error);
+
+        allRows = allRows.filter(r => r.id !== id);
+        let payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
+        payments = payments.filter(p => p.id !== id);
+        localStorage.setItem('pp_payments', JSON.stringify(payments));
+
+        applyFilters();
+    } catch(err) {
+        alert('Delete failed: ' + (err.message || err));
+    }
+};
 
 // Event Listeners
 filterBtn.onclick = applyFilters;
@@ -215,6 +318,38 @@ if (exportExcelBtn) {
     };
 }
 
+// Normalization helpers
+const repNorm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function scanStackedSections(allRows) {
+    const sections = {};
+    let curr = null;
+    let currKey = null;
+
+    for (let r = 0; r < allRows.length; r++) {
+        const row = allRows[r] || [];
+        const s = row.map(c => repNorm(c)).join(' ');
+
+        let sig = null;
+        if (s.includes('date') && s.includes('usdt') && (s.includes('inr') || s.includes('amount'))) {
+            sig = 'payments';
+        } else if ((s.includes('agentname') || s.includes('agent')) && (s.includes('empid') || s.includes('ecode'))) {
+            sig = 'agents';
+        } else if (s.includes('clientname') && (s.includes('clientnumber') || s.includes('phone') || s.includes('panno') || s.includes('aadharno') || s.includes('emailid'))) {
+            sig = 'clients';
+        }
+
+        if (sig) {
+            currKey = sig;
+            curr = { headerRow: r, cells: row, rows: [] };
+            sections[currKey] = curr;
+        } else if (curr && row.some(c => String(c).trim() !== '')) {
+            curr.rows.push({ cells: row, rowNo: r + 1 });
+        }
+    }
+    return sections;
+}
+
 // Import Payments Excel
 if (importReportsFile) {
     importReportsFile.onchange = function(e) {
@@ -229,74 +364,96 @@ if (importReportsFile) {
 
                 let extractedRows = [];
 
-                // Sort sheet names: prioritize sheets with payment, txn, oct, data, raw in name
-                const sheetNames = workbook.SheetNames.slice().sort((a, b) => {
-                    const score = (name) => {
-                        const n = name.toLowerCase();
-                        if (n.includes('payment') || n.includes('raw') || n.includes('txn') || n.includes('data')) return 3;
-                        if (n.includes('oct') || n.includes('sep') || n.includes('sheet') || n.includes('sales')) return 2;
-                        return 1;
-                    };
-                    return score(b) - score(a);
-                });
-
-                for (const sName of sheetNames) {
+                // 1. First check if any sheet has stacked tables (like a multi-table CSV or single-sheet workbook)
+                for (const sName of workbook.SheetNames) {
                     const sheet = workbook.Sheets[sName];
                     if (!sheet || !sheet['!ref']) continue;
-
                     const rows2d = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
                     if (!rows2d || rows2d.length === 0) continue;
 
-                    // Scan first 15 rows to find the actual header row
-                    let headerRowIdx = 0;
-                    let bestHeaderScore = 0;
-
-                    for (let r = 0; r < Math.min(rows2d.length, 15); r++) {
-                        const rowCells = rows2d[r].map(c => String(c).toLowerCase().trim());
-                        let score = 0;
-                        rowCells.forEach(cell => {
-                            if (cell.includes('date')) score += 2;
-                            if (cell.includes('agent') || cell.includes('executive') || cell.includes('caller')) score += 2;
-                            if (cell.includes('usdt')) score += 3;
-                            if (cell.includes('inr') || cell.includes('amount')) score += 2;
-                            if (cell.includes('client') || cell.includes('customer') || cell.includes('party')) score += 2;
-                            if (cell.includes('ecode') || cell.includes('e-code') || cell.includes('code')) score += 2;
-                            if (cell.includes('tl') || cell.includes('leader')) score += 2;
-                            if (cell.includes('ops') || cell.includes('manager')) score += 2;
-                            if (cell.includes('mode')) score += 1;
+                    const stacked = scanStackedSections(rows2d);
+                    if (stacked.payments && stacked.payments.rows && stacked.payments.rows.length) {
+                        const headerCells = stacked.payments.cells.map(c => String(c).trim());
+                        extractedRows = stacked.payments.rows.map(r => {
+                            const obj = {};
+                            headerCells.forEach((h, idx) => {
+                                obj[h] = r.cells[idx] !== undefined ? r.cells[idx] : '';
+                            });
+                            return obj;
                         });
-
-                        if (score > bestHeaderScore && score >= 2) {
-                            bestHeaderScore = score;
-                            headerRowIdx = r;
-                        }
+                        break;
                     }
+                }
 
-                    const jsonRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIdx, defval: '' });
-                    if (jsonRows && jsonRows.length > 0) {
-                        // Check if these rows look like payment transactions
-                        let validInSheet = 0;
-                        jsonRows.forEach(row => {
-                            let hasSignal = false;
-                            for (const k in row) {
-                                const lk = k.toLowerCase();
-                                const lv = String(row[k]).trim();
-                                if ((lk.includes('agent') || lk.includes('client') || lk.includes('usdt') || lk.includes('inr') || lk.includes('amount')) && lv) {
-                                    hasSignal = true;
-                                }
+                // 2. Fallback to scanning sheets by name / headers if not stacked
+                if (extractedRows.length === 0) {
+                    const sheetNames = workbook.SheetNames.slice().sort((a, b) => {
+                        const score = (name) => {
+                            const n = name.toLowerCase();
+                            if (n.includes('payment') || n.includes('raw') || n.includes('txn') || n.includes('data')) return 3;
+                            if (n.includes('oct') || n.includes('sep') || n.includes('sheet') || n.includes('sales')) return 2;
+                            return 1;
+                        };
+                        return score(b) - score(a);
+                    });
+
+                    for (const sName of sheetNames) {
+                        const sheet = workbook.Sheets[sName];
+                        if (!sheet || !sheet['!ref']) continue;
+
+                        const rows2d = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                        if (!rows2d || rows2d.length === 0) continue;
+
+                        // Scan first 15 rows to find the actual header row
+                        let headerRowIdx = 0;
+                        let bestHeaderScore = 0;
+
+                        for (let r = 0; r < Math.min(rows2d.length, 15); r++) {
+                            const rowCells = rows2d[r].map(c => String(c).toLowerCase().trim());
+                            let score = 0;
+                            rowCells.forEach(cell => {
+                                if (cell.includes('date')) score += 2;
+                                if (cell.includes('agent') || cell.includes('executive') || cell.includes('caller')) score += 2;
+                                if (cell.includes('usdt')) score += 3;
+                                if (cell.includes('inr') || cell.includes('amount')) score += 2;
+                                if (cell.includes('client') || cell.includes('customer') || cell.includes('party')) score += 2;
+                                if (cell.includes('ecode') || cell.includes('e-code') || cell.includes('code')) score += 2;
+                                if (cell.includes('tl') || cell.includes('leader')) score += 2;
+                                if (cell.includes('ops') || cell.includes('manager')) score += 2;
+                                if (cell.includes('mode')) score += 1;
+                            });
+
+                            if (score > bestHeaderScore && score >= 2) {
+                                bestHeaderScore = score;
+                                headerRowIdx = r;
                             }
-                            if (hasSignal) validInSheet++;
-                        });
+                        }
 
-                        if (validInSheet > 0) {
-                            extractedRows = jsonRows;
-                            break; // Successfully found the primary payment sheet!
+                        const jsonRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIdx, defval: '' });
+                        if (jsonRows && jsonRows.length > 0) {
+                            let validInSheet = 0;
+                            jsonRows.forEach(row => {
+                                let hasSignal = false;
+                                for (const k in row) {
+                                    const lk = k.toLowerCase();
+                                    const lv = String(row[k]).trim();
+                                    if ((lk.includes('agent') || lk.includes('client') || lk.includes('usdt') || lk.includes('inr') || lk.includes('amount')) && lv) {
+                                        hasSignal = true;
+                                    }
+                                }
+                                if (hasSignal) validInSheet++;
+                            });
+
+                            if (validInSheet > 0) {
+                                extractedRows = jsonRows;
+                                break;
+                            }
                         }
                     }
                 }
 
                 if (extractedRows.length === 0) {
-                    throw new Error('No readable payment transaction rows found in the selected Excel file.');
+                    throw new Error('No readable payment transaction rows found in the selected file.');
                 }
 
                 let payments = JSON.parse(localStorage.getItem('pp_payments') || '[]');
@@ -338,12 +495,12 @@ if (importReportsFile) {
                         else if (k.includes('tl') || k.includes('team leader') || k.includes('lead') || k.includes('leader')) dbData.tl = val;
                         else if (k.includes('ops manager') || k.includes('ops') || k.includes('manager')) dbData.ops_manager = val;
                         else if (k.includes('client name') || k === 'client' || k.includes('customer') || k.includes('party')) dbData.client_name = val;
-                        else if (k.includes('client number') || k.includes('client number') || k.includes('phone') || k.includes('mobile') || k.includes('contact') || k === 'number') dbData.client_number = val;
+                        else if (k.includes('client number') || k.includes('phone') || k.includes('mobile') || k.includes('contact') || k === 'number') dbData.client_number = val;
                         else if (k.includes('email') || k.includes('mail')) dbData.email_id = val;
                         else if (k.includes('mode') || k.includes('type')) dbData.payment_mode = val;
                         else if (k.includes('usdt')) dbData.usdt = row[key];
                         else if (k.includes('divided') || k.includes('rate') || k.includes('div')) dbData.divided_by = row[key];
-                        else if (k.includes('inr amount') || k === 'inr' || k.includes('total inr') || k.includes('inr amt') || k === 'amount' || k.includes('amount') || k.includes('sales')) dbData.inr_amount = row[key];
+                        else if (k.includes('inr amount') || k === 'inr' || k.includes('total inr') || k.includes('inr amt') || k === 'amount' || k.includes('sales')) dbData.inr_amount = row[key];
                         else if (k.includes('ratio') || k.includes('split')) dbData.ratio = val;
                         else if (k.includes('pan')) dbData.pan_no = val;
                         else if (k.includes('aadhar') || k.includes('aadhaar')) dbData.aadhar_no = val;
@@ -398,8 +555,33 @@ if (importReportsFile) {
                     // Only count as valid payment if it has an agent or client or money amount
                     if (dbData.agent_name || dbData.client_name || dbData.usdt > 0 || dbData.inr_amount > 0) {
                         if (!dbData.agent_name) dbData.agent_name = 'Unassigned Agent';
-                        dbData.payment_mode = (dbData.payment_mode || 'P2P').toUpperCase().includes('D') ? 'D P2P' : 'P2P';
-                        dbData.received_in = (dbData.received_in || '').toLowerCase().includes('world') || (dbData.received_in || '').toLowerCase().includes('wk') ? 'World of Crypto' : 'Digital Verse';
+
+                        const rawMode = (dbData.payment_mode || 'P2P').trim();
+                        if (rawMode.toLowerCase().includes('vendor')) {
+                            dbData.payment_mode = 'Vendor';
+                        } else if (rawMode.toUpperCase().includes('D') && rawMode.toUpperCase().includes('P2P')) {
+                            dbData.payment_mode = 'D P2P';
+                        } else if (rawMode.toUpperCase() === 'P2P') {
+                            dbData.payment_mode = 'P2P';
+                        } else if (rawMode) {
+                            dbData.payment_mode = rawMode;
+                        } else {
+                            dbData.payment_mode = 'P2P';
+                        }
+
+                        const rawRec = (dbData.received_in || '').trim();
+                        if (rawRec.toLowerCase().includes('world') || rawRec.toLowerCase().includes('wk') || rawRec.toLowerCase().includes('wok') || rawRec.toLowerCase().includes('crypto')) {
+                            dbData.received_in = 'World of Crypto';
+                        } else if (rawRec.toLowerCase().includes('digital') || rawRec.toLowerCase().includes('dv')) {
+                            dbData.received_in = 'Digital Verse';
+                        } else if (rawRec) {
+                            dbData.received_in = rawRec;
+                        } else {
+                            dbData.received_in = 'Digital Verse';
+                        }
+
+                        dbData.ops_manager = resolveOpsName(dbData.ops_manager);
+                        dbData.tl = resolveTlName(dbData.tl);
 
                         dbData.id = nextId + count;
                         dbData.created_by_name = 'Payment Sheet Import';
