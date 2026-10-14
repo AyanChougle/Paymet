@@ -777,9 +777,8 @@ if ($action === 'get_current_user') {
 
 // 4. DASHBOARD & REPORTS (REQUIRES AUTH)
 if ($action === 'dashboard' || $action === 'reports') {
-    require_auth();
-
-    $raw = $pdo->query("SELECT * FROM pp_payments ORDER BY payment_date ASC, id ASC")->fetchAll();
+    require_auth();    
+$raw = $pdo->query("SELECT * FROM pp_payments ORDER BY payment_date DESC, id DESC")->fetchAll();   
     $payments = [];
     foreach ($raw as $r) {
         $usdt = floatval($r['usdt'] ?? 0);
@@ -1055,7 +1054,7 @@ if ($action === 'bulk_import') {
 
     $saved = ['ops' => 0, 'tls' => 0, 'agents' => 0, 'clients' => 0, 'payments' => 0];
     $errors = [];
-
+payment_date
     // 1. Ops Managers
     foreach ($opsList as $o) {
         $name = clean_str($o['name'] ?? '', 150);
