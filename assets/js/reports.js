@@ -140,8 +140,8 @@ function applyFilters() {
         if (comp) {
             const cLow = comp.toLowerCase();
             const rLow = (r.received_in || '').toLowerCase();
-            if (cLow.includes('world') || cLow.includes('krypto') || cLow.includes('crypto') || cLow.includes('wk')) {
-                if (!rLow.includes('world') && !rLow.includes('krypto') && !rLow.includes('crypto') && !rLow.includes('wk')) return false;
+            if (cLow.includes('world') || cLow.includes('krypto') || cLow.includes('wk')) {
+                if (!rLow.includes('world') && !rLow.includes('krypto') && !rLow.includes('wk')) return false;
             } else if (cLow.includes('digital') || cLow.includes('dv')) {
                 if (!rLow.includes('digital') && !rLow.includes('dv')) return false;
             } else if (!rLow.includes(cLow)) {
@@ -582,8 +582,8 @@ if (importReportsFile) {
                         }
 
                         const rawRec = (dbData.received_in || '').trim();
-                        if (rawRec.toLowerCase().includes('world') || rawRec.toLowerCase().includes('wk') || rawRec.toLowerCase().includes('wok') || rawRec.toLowerCase().includes('crypto')) {
-                            dbData.received_in = 'World of Crypto';
+                        if (rawRec.toLowerCase().includes('world') || rawRec.toLowerCase().includes('wk') || rawRec.toLowerCase().includes('wok') || rawRec.toLowerCase().includes('krypto')) {
+                            dbData.received_in = 'World of Krypto';
                         } else if (rawRec.toLowerCase().includes('digital') || rawRec.toLowerCase().includes('dv')) {
                             dbData.received_in = 'Digital Verse';
                         } else if (rawRec) {
