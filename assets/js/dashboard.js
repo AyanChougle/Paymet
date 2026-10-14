@@ -598,7 +598,7 @@ async function load() {
     const tlRows = sortedTLs.map((tl, i) => {
         tlMtdTotal += tl.mtd;
         tlFtdTotal += tl.ftd;
-        const target = tl.target || getRoleTarget('TL', tl.name);
+        const target = (parseFloat(tl.target || 0) || getRoleTarget('TL', tl.name));
         return `<tr>
             <td style="color:var(--text-muted);">${i + 1}</td>
             <td><strong>${tl.name}</strong></td>
@@ -625,7 +625,7 @@ async function load() {
     const opsRows = sortedOps.map((op, i) => {
         opsMtdTotal += op.mtd;
         opsFtdTotal += op.ftd;
-        const target = op.target || getRoleTarget('OPS', op.name);
+        const target = (parseFloat(op.target || 0) || getRoleTarget('OPS', op.name));
         const teamCount = op.teams.size;
         const modeSub = `Direct: ${fmtInrInt(op.modeMap['D P2P'] || 0)} | P2P: ${fmtInrInt(op.modeMap['P2P'] || 0)}`;
         const compSub = `DV: ${fmtInrInt(op.compMap['Digital Verse'] || 0)} | WK: ${fmtInrInt(op.compMap['World of Crypto'] || 0)}`;
