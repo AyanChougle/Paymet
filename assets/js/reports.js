@@ -123,6 +123,10 @@ async function loadData() {
         const res = await api('reports', {}).catch(() => ({ rows: [] }));
         allRows = res.rows || [];
     }
+    if (typeof getUserSetting === 'function') {
+        const savedPageSize = getUserSetting('reports_pageSize', null);
+        if (savedPageSize) pageSizeSelect.value = savedPageSize;
+    }
     applyFilters();
 }
 
@@ -204,34 +208,34 @@ function renderTable() {
 
     const curUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
     const rawRole = (curUser && curUser.role ? curUser.role.toUpperCase().trim() : 'ENTRY_USER');
-    const canDelete = (rawRole === 'ADMIN' || rawRole === 'OPS_MANAGER');
+    // Ops Manager and Entry User CANNOT delete payment records; strictly restricted to Admin
+    const canDelete = (rawRole === 'ADMIN');
 
     tableBody.innerHTML = pageRows.map((r, i) => {
         const ecode = escapeHtml(r.ecode || getAgentEcode(r.agent_name));
-        const ops = escapeHtml(r.ops_manager || getAgentOps(r.agent_name));
-        const enteredBy = r.created_by_name ? `<strong>${escapeHtml(r.created_by_name)}</strong>` : '<span style="color:var(--text-dim);">-</span>';
+        const ops = escapeHtml(toTitleCase(r.ops_manager || getAgentOps(r.agent_name)));
+        const agentName = escapeHtml(toTitleCase(r.agent_name || ''));
+        const tlName = escapeHtml(toTitleCase(r.tl || '-'));
+        const clientName = escapeHtml(toTitleCase(r.client_name || '-'));
+        const enteredBy = r.created_by_name ? `<strong>${escapeHtml(toTitleCase(r.created_by_name))}</strong>` : '<span style="color:var(--text-dim);">-</span>';
         const entryTime = r.created_at ? `<span style="font-size:11px; color:var(--text-muted);">${escapeHtml(r.created_at)}</span>` : '-';
         const actionHtml = canDelete && r.id 
             ? `<button class="ghost danger" style="padding:3px 8px; font-size:11px; border-radius:4px;" onclick="deletePaymentRecord(${r.id})">Delete</button>` 
-            : '<span style="color:var(--text-dim);">-</span>';
+            : '<span style="color:var(--text-dim); font-size:11px;">-</span>';
 
         return `<tr>
             <td style="color:var(--text-muted);">${startIdx + i + 1}</td>
             <td>${escapeHtml(r.payment_date || '')}</td>
             <td style="color:var(--text-muted); font-family:var(--font-mono); font-size:12px;">${ecode}</td>
-            <td><strong>${escapeHtml(r.agent_name || '')}</strong></td>
-            <td>${escapeHtml(r.tl || '-')}</td>
+            <td><strong>${agentName}</strong></td>
+            <td>${tlName}</td>
             <td>${ops}</td>
-            <td>${escapeHtml(r.client_name || '-')}</td>
+            <td>${clientName}</td>
             <td>${escapeHtml(r.client_number || '-')}</td>
-            <td>${escapeHtml(r.email_id || '-')}</td>
             <td><span style="font-weight:600;">${escapeHtml(r.payment_mode || 'P2P')}</span></td>
             <td>${fmtUsdt(r.usdt)}</td>
             <td style="font-weight:700; color:var(--accent);">${fmtInr(r.inr_amount)}</td>
             <td>${escapeHtml(r.ratio || '-')}</td>
-            <td style="font-family:var(--font-mono); font-size:11.5px;">${escapeHtml(r.pan_no || '-')}</td>
-            <td style="font-family:var(--font-mono); font-size:11.5px;">${escapeHtml(r.aadhar_no || '-')}</td>
-            <td>${escapeHtml(r.state || '-')}</td>
             <td>${escapeHtml(r.received_in || '-')}</td>
             <td>${enteredBy}</td>
             <td>${entryTime}</td>
@@ -278,6 +282,9 @@ clearBtn.onclick = () => {
 
 pageSizeSelect.onchange = () => {
     currentPage = 1;
+    if (typeof saveUserSetting === 'function') {
+        saveUserSetting('reports_pageSize', pageSizeSelect.value);
+    }
     renderTable();
 };
 
@@ -302,21 +309,17 @@ if (exportExcelBtn) {
             'SR No': idx + 1,
             'Date': r.payment_date || '',
             'E-Code': r.ecode || getAgentEcode(r.agent_name),
-            'Agent Name': r.agent_name || '',
-            'TL Name': r.tl || '',
-            'Ops Manager': r.ops_manager || getAgentOps(r.agent_name),
-            'Client Name': r.client_name || '',
+            'Agent Name': toTitleCase(r.agent_name || ''),
+            'TL Name': toTitleCase(r.tl || ''),
+            'Ops Manager': toTitleCase(r.ops_manager || getAgentOps(r.agent_name)),
+            'Client Name': toTitleCase(r.client_name || ''),
             'Client Number': r.client_number || '',
-            'Email ID': r.email_id || '',
             'Payment Mode': r.payment_mode || 'P2P',
             'USDT': parseFloat(r.usdt || 0),
             'INR Amount': parseFloat(r.inr_amount || 0),
             'Ratio': r.ratio || '',
-            'PAN NO': r.pan_no || '',
-            'AADHAR NO': r.aadhar_no || '',
-            'STATE': r.state || '',
             'Received Company': r.received_in || '',
-            'Entered By': r.created_by_name || '',
+            'Entered By': toTitleCase(r.created_by_name || ''),
             'Entry Timestamp': r.created_at || ''
         }));
 

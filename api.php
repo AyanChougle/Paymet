@@ -1,15 +1,17 @@
 <?php
+date_default_timezone_set('Asia/Kolkata');
+
 // ========================================================
 // SECURITY HEADERS & CORS HARDENING
 // ========================================================
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $httpHost = $_SERVER['HTTP_HOST'] ?? '';
 
-// Restrict CORS safely (never allow wildcard with credentials)
+// Restrict CORS safely (allow same host, subdomain, or local dev origins)
 if (!empty($origin)) {
     $originHost = parse_url($origin, PHP_URL_HOST);
-    // Allow same host or subdomain
-    if ($originHost === $httpHost || (strpos($httpHost, ':') !== false && $originHost === explode(':', $httpHost)[0])) {
+    $isLocal = in_array($originHost, ['localhost', '127.0.0.1', '::1'], true);
+    if ($originHost === $httpHost || (strpos($httpHost, ':') !== false && $originHost === explode(':', $httpHost)[0]) || $isLocal) {
         header("Access-Control-Allow-Origin: $origin");
         header('Access-Control-Allow-Credentials: true');
     }
@@ -116,6 +118,10 @@ if (!$pdo) {
     error_log("Database Connection Failed: " . $lastError);
     err('Database Connection Failed: ' . $lastError, 500);
 }
+
+try {
+    $pdo->exec("SET time_zone = '+05:30'");
+} catch(Throwable $e) {}
 
 // Auto-align all database table columns with live system requirements
 try {
@@ -319,6 +325,11 @@ function clean_str($val, $maxLen = 255) {
         $val = mb_substr($val, 0, $maxLen);
     }
     return $val;
+}
+
+function to_title_case(?string $str): string {
+    if (!$str) return '';
+    return mb_convert_case(trim($str), MB_CASE_TITLE, "UTF-8");
 }
 
 // KYC Rules, Normalization & Validation Helpers
@@ -777,8 +788,9 @@ if ($action === 'get_current_user') {
 
 // 4. DASHBOARD & REPORTS (REQUIRES AUTH)
 if ($action === 'dashboard' || $action === 'reports') {
-    require_auth();    
-$raw = $pdo->query("SELECT * FROM pp_payments ORDER BY payment_date DESC, id DESC")->fetchAll();   
+    require_auth();
+
+    $raw = $pdo->query("SELECT * FROM pp_payments ORDER BY payment_date DESC, id DESC")->fetchAll();
     $payments = [];
     foreach ($raw as $r) {
         $usdt = floatval($r['usdt'] ?? 0);
@@ -810,58 +822,30 @@ $raw = $pdo->query("SELECT * FROM pp_payments ORDER BY payment_date DESC, id DES
             'created_at' => $r['created_at'] ?? $r['entry_timestamp'] ?? ($r['payment_date'] ?? '')
         ];
     }
+    // Enforce newest-first ordering in PHP as well as SQL. This is deliberate:
+    // some legacy rows may store dates as text, and frontend code may rely on
+    // the first item being the newest payment.
+    usort($payments, static function (array $a, array $b): int {
+        $dateA = trim((string)($a['payment_date'] ?? ''));
+        $dateB = trim((string)($b['payment_date'] ?? ''));
+        $timeA = strtotime($dateA);
+        $timeB = strtotime($dateB);
 
-$sortNewestFirst = function (&$payments) {
-    usort($payments, function ($a, $b) {
-        $dateCompare = strcmp(
-            (string) ($b['payment_date'] ?? ''),
-            (string) ($a['payment_date'] ?? '')
-        );
+        // Valid dates sort ahead of unparseable/empty dates.
+        if ($timeA === false && $timeB !== false) return 1;
+        if ($timeA !== false && $timeB === false) return -1;
+        if ($timeA !== false && $timeB !== false && $timeA !== $timeB) {
+            return $timeB <=> $timeA;
+        }
 
-        return $dateCompare !== 0
-            ? $dateCompare
-            : ((int) ($b['id'] ?? 0) <=> (int) ($a['id'] ?? 0));
+        // Stable tie-breaker: newest inserted record first for the same date.
+        return ((int)($b['id'] ?? 0)) <=> ((int)($a['id'] ?? 0));
     });
-};
 
-// Sort the payment records BEFORE building the response
-$sortNewestFirst($payments);
-
-$lastEntry = count($payments) > 0
-    ? $payments[0]
-    : null;
-
-out([
-    'rawPayments' => $payments,
-    'lastEntry' => $lastEntry,
-    'rows' => $payments
-]);
-
-$sortNewestFirst = function (&$payments) {
-    usort($payments, function ($a, $b) {
-        $dateCompare = strcmp(
-            (string) ($b['payment_date'] ?? ''),
-            (string) ($a['payment_date'] ?? '')
-        );
-
-        return $dateCompare !== 0
-            ? $dateCompare
-            : ((int) ($b['id'] ?? 0) <=> (int) ($a['id'] ?? 0));
-    });
-};
-
-// Sort the payment records BEFORE building the response
-$sortNewestFirst($payments);
-
-$lastEntry = count($payments) > 0
-    ? $payments[0]
-    : null;
-
-out([
-    'rawPayments' => $payments,
-    'lastEntry' => $lastEntry,
-    'rows' => $payments
-]);
+    // Keep lastEntry consistent with newest-first report ordering.
+    $lastEntry = $payments[0] ?? null;
+    out(['rawPayments' => $payments, 'lastEntry' => $lastEntry, 'rows' => $payments]);
+}
 
 // 5. AGENTS DIRECTORY (REQUIRES AUTH)
 if ($action === 'agents') {
@@ -875,7 +859,8 @@ if ($action === 'agents') {
             'ecode' => $r['ecode'] ?? $r['emp_id'] ?? $r['e_code'] ?? '',
             'agent_name' => $r['agent_name'] ?? $r['name'] ?? '',
             'ops_manager' => $r['ops_manager'] ?? '',
-            'tl' => $r['tl'] ?? $r['team_leader'] ?? $r['tl_name'] ?? ''
+            'tl' => $r['tl'] ?? $r['team_leader'] ?? $r['tl_name'] ?? '',
+            'is_active' => isset($r['is_active']) ? (int)$r['is_active'] : 1
         ];
     }
 
@@ -989,7 +974,7 @@ if ($action === 'create_payment') {
     if (!$dt || $dt->format('Y-m-d') !== $pDate) err('Invalid payment date.');
     if ($pDate > date('Y-m-d', strtotime('+1 day'))) err('Payment date cannot be in the future.');
 
-    $agent = clean_str($data['agent_name'] ?? '', 150);
+    $agent = to_title_case(clean_str($data['agent_name'] ?? '', 150));
     if ($agent === '') err('Agent name is required.');
 
     foreach (['usdt', 'divided_by', 'inr_amount'] as $f) {
@@ -1016,8 +1001,11 @@ if ($action === 'create_payment') {
         }
     }
 
-    // Creator is stamped from authenticated session
-    $creator = $curUser['name'] ?? 'Staff';
+    // Creator is stamped from authenticated session or payload
+    $creator = trim($curUser['name'] ?? $curUser['username'] ?? '');
+    if ($creator === '' || strtolower($creator) === 'staff' || strtolower($creator) === 'system') {
+        $creator = trim(clean_str($data['created_by_name'] ?? 'Admin', 150));
+    }
     $mode = clean_str($data['payment_mode'] ?? 'P2P', 50);
     if ($mode === '') $mode = 'P2P';
     $recIn = clean_str($data['received_in'] ?? $data['received_company'] ?? 'Digital Verse', 100);
@@ -1029,9 +1017,9 @@ if ($action === 'create_payment') {
     }
 
     $ecode = clean_str($data['ecode'] ?? '', 50);
-    $tl = clean_str($data['tl'] ?? '', 150);
-    $ops = clean_str($data['ops_manager'] ?? '', 150);
-    $cName = clean_str($data['client_name'] ?? '', 150);
+    $tl = to_title_case(clean_str($data['tl'] ?? '', 150));
+    $ops = to_title_case(clean_str($data['ops_manager'] ?? '', 150));
+    $cName = to_title_case(clean_str($data['client_name'] ?? '', 150));
     $cNum = clean_phone($data['client_number'] ?? '');
     $email = strtolower(trim(clean_str($data['email_id'] ?? '', 150)));
     $ratio = clean_str($data['ratio'] ?? '', 50);
@@ -1103,7 +1091,7 @@ if ($action === 'bulk_import') {
 
     $saved = ['ops' => 0, 'tls' => 0, 'agents' => 0, 'clients' => 0, 'payments' => 0];
     $errors = [];
-payment_date
+
     // 1. Ops Managers
     foreach ($opsList as $o) {
         $name = clean_str($o['name'] ?? '', 150);
@@ -1300,7 +1288,7 @@ payment_date
 }
 
 if ($action === 'delete_payment') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN']);
     $id = (int)($data['id'] ?? 0);
     if ($id <= 0) err('Payment ID is required.');
     $pdo->prepare("DELETE FROM pp_payments WHERE id = ?")->execute([$id]);
@@ -1697,7 +1685,8 @@ if ($action === 'remove_agent_node') {
 if ($action === 'upsert_client_node') {
     require_auth(); // Allowed during payment recording by any authenticated staff
 
-    $cName = clean_str($data['client_name'] ?? '', 150);
+    $id = (int)($data['id'] ?? 0);
+    $cName = to_title_case(clean_str($data['client_name'] ?? '', 150));
     $cNum = clean_phone($data['client_number'] ?? '');
     $email = strtolower(trim(clean_str($data['email_id'] ?? '', 150)));
     $pan = clean_pan($data['pan_no'] ?? '');
@@ -1709,6 +1698,12 @@ if ($action === 'upsert_client_node') {
     $kycErr = validate_kyc_rules($cNum, $pan, $aadhar, $email, false);
     if ($kycErr) {
         err($kycErr);
+    }
+
+    if ($id > 0) {
+        $stmt = $pdo->prepare("UPDATE pp_clients SET client_name=?, client_number=?, email_id=?, pan_no=?, aadhar_no=?, state=? WHERE id=?");
+        $stmt->execute([$cName ?: 'Unknown Client', $cNum, $email, $pan, $aadhar, $state, $id]);
+        out(['success' => true]);
     }
 
     $check = null;
@@ -1747,6 +1742,45 @@ if ($action === 'remove_client_node') {
     } elseif ($cName) {
         $pdo->prepare("DELETE FROM pp_clients WHERE LOWER(client_name) = LOWER(?)")->execute([$cName]);
     }
+    out(['success' => true]);
+}
+
+// 12b. TOGGLE AGENT STATUS (ACTIVE / INACTIVE)
+if ($action === 'toggle_agent_status') {
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
+    $agentId = (int)($data['id'] ?? 0);
+    $agentName = clean_str($data['agent_name'] ?? '', 150);
+    $newStatus = isset($data['is_active']) ? (int)$data['is_active'] : null;
+
+    try {
+        $cols = array_map('strtolower', $pdo->query("DESCRIBE `pp_agents`")->fetchAll(PDO::FETCH_COLUMN) ?: []);
+        if (!in_array('is_active', $cols, true)) {
+            $pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `is_active` TINYINT(1) NOT NULL DEFAULT 1");
+        }
+    } catch (Throwable $e) {}
+
+    if ($agentId > 0) {
+        if ($newStatus === null) {
+            $pdo->prepare("UPDATE pp_agents SET is_active = IF(is_active = 0, 1, 0) WHERE id = ?")->execute([$agentId]);
+        } else {
+            $pdo->prepare("UPDATE pp_agents SET is_active = ? WHERE id = ?")->execute([$newStatus ? 1 : 0, $agentId]);
+        }
+    } elseif ($agentName) {
+        if ($newStatus === null) {
+            $pdo->prepare("UPDATE pp_agents SET is_active = IF(is_active = 0, 1, 0) WHERE LOWER(agent_name) = LOWER(?)")->execute([$agentName]);
+        } else {
+            $pdo->prepare("UPDATE pp_agents SET is_active = ? WHERE LOWER(agent_name) = LOWER(?)")->execute([$newStatus ? 1 : 0, $agentName]);
+        }
+    } else {
+        err('Agent ID or Name is required.');
+    }
+    out(['success' => true]);
+}
+
+// 12c. SAVE USER SETTINGS
+if ($action === 'save_user_settings') {
+    $u = require_auth();
+    $_SESSION['pp_user_settings'] = $data['settings'] ?? [];
     out(['success' => true]);
 }
 

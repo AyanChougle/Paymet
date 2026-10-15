@@ -6,7 +6,7 @@
     <title>Revenue Overview | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=12">
+    <link rel="stylesheet" href="assets/css/app.css?v=14">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -43,6 +43,14 @@
 
         <!-- Filters Bar -->
         <section class="filters">
+            <label>
+                From Date
+                <input type="date" id="fromDate" title="Select custom start date">
+            </label>
+            <label>
+                To Date
+                <input type="date" id="toDate" title="Select custom end date">
+            </label>
             <label>
                 Month
                 <select id="monthFilter">
@@ -85,30 +93,86 @@
         <!-- View Switcher Tabs -->
         <div class="section-tabs" id="dashTabs" style="margin-top:20px; margin-bottom:16px;">
             <button class="tab-btn active" onclick="switchDashTab('all', this)">All Reports</button>
-            <button class="tab-btn" onclick="switchDashTab('agents', this)">Agents Report</button>
-            <button class="tab-btn" onclick="switchDashTab('tls', this)">Team Leaders</button>
             <button class="tab-btn" onclick="switchDashTab('ops', this)">Ops Managers</button>
-            <button class="tab-btn" onclick="switchDashTab('bifurcation', this)">Bifurcations</button>
+            <button class="tab-btn" onclick="switchDashTab('tls', this)">Team Leaders</button>
+            <button class="tab-btn" onclick="switchDashTab('agents', this)">Agents Report</button>
+            <button class="tab-btn" onclick="switchDashTab('company', this)">Company Bifurcation</button>
+            <button class="tab-btn" onclick="switchDashTab('mode', this)">Payment Modes</button>
         </div>
 
-        <!-- Agents Leaderboard -->
-        <section class="panel tab-section" id="sec-agents" style="margin-bottom:24px;">
+        <!-- 1. OPS MANAGERS SALES BREAKDOWN -->
+        <section class="panel tab-section" id="sec-ops">
+            <div class="panel-head">
+                <div>
+                    <h2>Ops Managers Sales Breakdown</h2>
+                    <p class="panel-sub">Operations Performance (Teams & Targets)</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="table-ops">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Ops Manager</th>
+                            <th>TL Teams</th>
+                            <th style="text-align: right;">MTD / Filter Sales</th>
+                            <th style="text-align: right;">FTD Sales</th>
+                            <th style="text-align: right;">Target</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="opsTableBody"></tbody>
+                    <tfoot id="opsTableFoot"></tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- 2. TEAM LEADERS SALES BREAKDOWN -->
+        <section class="panel tab-section" id="sec-tls">
+            <div class="panel-head">
+                <div>
+                    <h2>Team Leaders Sales Breakdown</h2>
+                    <p class="panel-sub">TL Grouped Sales & Targets</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="table-tls">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>TL Name</th>
+                            <th>Reporting Ops</th>
+                            <th style="text-align: right;">MTD / Filter Sales</th>
+                            <th style="text-align: right;">FTD Sales</th>
+                            <th style="text-align: right;">Target</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tlTableBody"></tbody>
+                    <tfoot id="tlTableFoot"></tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- 3. AGENTS SALES PERFORMANCE -->
+        <section class="panel tab-section" id="sec-agents">
             <div class="panel-head">
                 <div>
                     <h2>Agents Sales Performance</h2>
                     <p class="panel-sub">Month-to-Date (MTD) vs For-The-Day (FTD) Sales Leaderboard</p>
                 </div>
-                <div style="display: flex; gap: 10px; width: 100%; max-width: 250px; margin-top: 10px;">
-                    <input type="text" id="agentSearchFilter" class="input-field" placeholder="Search agent or e-code..." style="width: 100%;">
+                <div class="panel-head-search">
+                    <input type="text" id="agentSearchFilter" placeholder="Search agent or e-code...">
                 </div>
             </div>
             <div class="table-wrap">
-                <table>
+                <table class="table-agents">
                     <thead>
                         <tr>
-                            <th style="width: 50px; text-align: center;">Rank</th>
-                            <th style="text-align: left;">Emp Code</th>
-                            <th style="text-align: left;">Agent Name</th>
+                            <th>Rank</th>
+                            <th>Emp Code</th>
+                            <th>Agent Name</th>
+                            <th>Team Leader (TL)</th>
                             <th style="text-align: right;">MTD / Filter Sales (INR)</th>
                             <th style="text-align: right;">FTD Sales (INR)</th>
                         </tr>
@@ -117,90 +181,13 @@
                     <tfoot id="agentTableFoot"></tfoot>
                 </table>
             </div>
-            <div id="agentPagination" style="padding: 15px; display: flex; justify-content: flex-end; gap: 5px; align-items: center; flex-wrap: wrap;"></div>
+            <div id="agentPagination"></div>
         </section>
 
-        <!-- Team Leaders and Ops Managers side by side -->
-        <section class="two" id="sec-management" style="margin-bottom:24px;">
-            <!-- Team Leaders Report -->
-            <section class="panel tab-section" id="sec-tls">
-                <div class="panel-head">
-                    <div>
-                        <h2>Team Leaders Sales Breakdown</h2>
-                        <p class="panel-sub">TL Grouped Sales & Targets</p>
-                    </div>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width: 50px;">Rank</th>
-                                <th>TL Name</th>
-                                <th>MTD / Filter Sales</th>
-                                <th>FTD Sales</th>
-                                <th>Target</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tlTableBody"></tbody>
-                        <tfoot id="tlTableFoot"></tfoot>
-                    </table>
-                </div>
-            </section>
-
-            <!-- Ops Managers Report -->
-            <section class="panel tab-section" id="sec-ops">
-                <div class="panel-head">
-                    <div>
-                        <h2>Ops Managers Sales Breakdown</h2>
-                        <p class="panel-sub">Operations Performance (Teams & Targets)</p>
-                    </div>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width: 50px;">Rank</th>
-                                <th>Ops Manager</th>
-                                <th>TL Teams</th>
-                                <th>MTD / Filter Sales</th>
-                                <th>FTD Sales</th>
-                                <th>Target</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="opsTableBody"></tbody>
-                        <tfoot id="opsTableFoot"></tfoot>
-                    </table>
-                </div>
-            </section>
-        </section>
-
-        <!-- Payment Bifurcations -->
-        <section class="two tab-section" id="sec-bifurcation">
-            <section class="panel">
-                <div class="panel-head">
-                    <div>
-                        <h2>Payment Mode Bifurcation (P2P vs D P2P)</h2>
-                        <p class="panel-sub">USDT & INR Breakdown by Mode</p>
-                    </div>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Payment Mode</th>
-                                <th>Total USDT</th>
-                                <th>Total INR</th>
-                                <th>Transactions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="modeTableBody"></tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="panel">
+        <!-- 4 & 5. BIFURCATIONS (Company & Payment Mode) -->
+        <div class="bifurcation-grid" id="bifurcationGrid">
+            <!-- 4. COMPANY RECEIVED IN BIFURCATION -->
+            <section class="panel tab-section" id="sec-company">
                 <div class="panel-head">
                     <div>
                         <h2>Company Received In Bifurcation</h2>
@@ -208,20 +195,43 @@
                     </div>
                 </div>
                 <div class="table-wrap">
-                    <table>
+                    <table class="table-company">
                         <thead>
                             <tr>
-                                <th>Received Company</th>
-                                <th>Total USDT</th>
-                                <th>Total INR</th>
-                                <th>Transactions</th>
+                                <th style="text-align: left;">Received Company</th>
+                                <th style="text-align: right;">Total USDT</th>
+                                <th style="text-align: right;">Total INR</th>
+                                <th style="text-align: center;">Transactions</th>
                             </tr>
                         </thead>
                         <tbody id="companyTableBody"></tbody>
                     </table>
                 </div>
             </section>
-        </section>
+
+            <!-- 5. PAYMENT MODE BIFURCATION -->
+            <section class="panel tab-section" id="sec-mode">
+                <div class="panel-head">
+                    <div>
+                        <h2>Payment Mode Bifurcation (P2P vs D P2P)</h2>
+                        <p class="panel-sub">USDT & INR Breakdown by Mode</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="table-mode">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left;">Payment Mode</th>
+                                <th style="text-align: right;">Total USDT</th>
+                                <th style="text-align: right;">Total INR</th>
+                                <th style="text-align: center;">Transactions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modeTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
     </main>
 
     <script src="assets/js/theme.js"></script>

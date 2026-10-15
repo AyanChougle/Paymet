@@ -1,5 +1,7 @@
 const monthFilter = document.getElementById('monthFilter');
 const ftdDate = document.getElementById('ftdDate');
+const fromDate = document.getElementById('fromDate');
+const toDate = document.getElementById('toDate');
 const applyBtn = document.getElementById('apply');
 const clearBtn = document.getElementById('clearBtn');
 const exportExcelBtn = document.getElementById('exportExcelBtn');
@@ -17,15 +19,24 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
-const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtInrInt = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+const fmtInr = (num) => '₹ ' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtInrInt = (num) => '₹ ' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const fmtUsdt = (num) => Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function getAgentEcode(name) {
     if (!name) return '-';
     const agentsList = JSON.parse(localStorage.getItem('pp_agents') || localStorage.getItem('pp_mappings') || '[]');
-    const found = agentsList.find(a => (a.agent_name || '').toLowerCase() === name.toLowerCase());
+    const clean = name.toLowerCase().trim();
+    const found = agentsList.find(a => (a.agent_name || a.name || '').toLowerCase().trim() === clean);
     return found && found.ecode ? found.ecode : '-';
+}
+
+function getAgentTl(name) {
+    if (!name) return '-';
+    const agentsList = JSON.parse(localStorage.getItem('pp_agents') || localStorage.getItem('pp_mappings') || '[]');
+    const clean = name.toLowerCase().trim();
+    const found = agentsList.find(a => (a.agent_name || a.name || '').toLowerCase().trim() === clean);
+    return found && (found.tl || found.team_leader) ? (found.tl || found.team_leader) : '-';
 }
 
 const CANONICAL_ROLE_TARGETS = {
@@ -74,7 +85,7 @@ function getRoleTarget(type, name) {
     return 0;
 }
 
-// Tab Switching
+// Tab Switching across full-width stacked breakdown panels
 window.switchDashTab = function(tabName, el) {
     document.querySelectorAll('#dashTabs .tab-btn').forEach(btn => btn.classList.remove('active'));
     if (el) {
@@ -83,38 +94,25 @@ window.switchDashTab = function(tabName, el) {
         window.event.target.classList.add('active');
     }
 
-    const secAgents = document.getElementById('sec-agents');
-    const secMgmt = document.getElementById('sec-management');
-    const secTls = document.getElementById('sec-tls');
     const secOps = document.getElementById('sec-ops');
-    const secBifur = document.getElementById('sec-bifurcation');
+    const secTls = document.getElementById('sec-tls');
+    const secAgents = document.getElementById('sec-agents');
+    const secCompany = document.getElementById('sec-company');
+    const secMode = document.getElementById('sec-mode');
+    const allSecs = [secOps, secTls, secAgents, secCompany, secMode];
 
     if (tabName === 'all') {
-        if (secAgents) secAgents.style.display = 'block';
-        if (secMgmt) secMgmt.style.display = 'grid';
-        if (secTls) secTls.style.display = 'block';
-        if (secOps) secOps.style.display = 'block';
-        if (secBifur) secBifur.style.display = 'grid';
-    } else if (tabName === 'agents') {
-        if (secAgents) secAgents.style.display = 'block';
-        if (secMgmt) secMgmt.style.display = 'none';
-        if (secBifur) secBifur.style.display = 'none';
-    } else if (tabName === 'tls') {
-        if (secAgents) secAgents.style.display = 'none';
-        if (secMgmt) secMgmt.style.display = 'block';
-        if (secTls) secTls.style.display = 'block';
-        if (secOps) secOps.style.display = 'none';
-        if (secBifur) secBifur.style.display = 'none';
+        allSecs.forEach(s => { if (s) s.style.display = 'block'; });
     } else if (tabName === 'ops') {
-        if (secAgents) secAgents.style.display = 'none';
-        if (secMgmt) secMgmt.style.display = 'block';
-        if (secTls) secTls.style.display = 'none';
-        if (secOps) secOps.style.display = 'block';
-        if (secBifur) secBifur.style.display = 'none';
-    } else if (tabName === 'bifurcation') {
-        if (secAgents) secAgents.style.display = 'none';
-        if (secMgmt) secMgmt.style.display = 'none';
-        if (secBifur) secBifur.style.display = 'grid';
+        allSecs.forEach(s => { if (s) s.style.display = (s === secOps ? 'block' : 'none'); });
+    } else if (tabName === 'tls') {
+        allSecs.forEach(s => { if (s) s.style.display = (s === secTls ? 'block' : 'none'); });
+    } else if (tabName === 'agents') {
+        allSecs.forEach(s => { if (s) s.style.display = (s === secAgents ? 'block' : 'none'); });
+    } else if (tabName === 'company') {
+        allSecs.forEach(s => { if (s) s.style.display = (s === secCompany ? 'block' : 'none'); });
+    } else if (tabName === 'mode') {
+        allSecs.forEach(s => { if (s) s.style.display = (s === secMode ? 'block' : 'none'); });
     }
 };
 
@@ -160,12 +158,50 @@ async function load() {
         window.dbTls = dbTls;
     }
 
+function formatLastEntryTime(str) {
+    if (!str) return '-';
+    const s = String(str).trim();
+    // Handles ISO strings like 2026-10-15T10:02:00.000Z or standard 2026-10-15 15:32:00
+    if (s.includes('T') || s.endsWith('Z')) {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const datePart = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+            let hours = d.getHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            const hStr = String(hours).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return `${datePart}, ${hStr}:${mm} ${ampm}`;
+        }
+    }
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+    if (!match) return s;
+    const [, y, m, dNum, hh, mm] = match;
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const mName = monthNames[parseInt(m, 10) - 1] || m;
+    const datePart = `${parseInt(dNum, 10)} ${mName} ${y}`;
+    if (hh === undefined || mm === undefined) return datePart;
+
+    let hours = parseInt(hh, 10);
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    const hStr = String(hours).padStart(2, '0');
+    return `${datePart}, ${hStr}:${mm} ${ampm}`;
+}
+
     // Last Entry Audit Display
     const lastEntryBadge = document.getElementById('lastEntryBadge');
     if (lastEntryBadge && lastEntry) {
-        const entryBy = lastEntry.created_by_name || 'System';
-        const entryTime = lastEntry.created_at || lastEntry.payment_date || '-';
-        lastEntryBadge.innerHTML = `Last Entry: <strong>${entryTime}</strong> by <span style="color:var(--accent); font-weight:700;">${entryBy}</span> (${fmtInr(lastEntry.inr_amount)})`;
+        const u = (typeof getCurrentUser === 'function' ? getCurrentUser() : null) || JSON.parse(sessionStorage.getItem('pp_user') || 'null');
+        let rawBy = lastEntry.created_by_name || lastEntry.entered_by;
+        if (!rawBy || rawBy.toLowerCase() === 'staff' || rawBy.toLowerCase() === 'system') {
+            rawBy = u ? (u.name || u.username) : 'Admin';
+        }
+        const entryBy = toTitleCase(rawBy);
+        const rawTime = lastEntry.created_at || lastEntry.entry_timestamp || lastEntry.payment_date || '-';
+        const entryTime = formatLastEntryTime(rawTime);
+        lastEntryBadge.innerHTML = `Last Entry: <strong>${entryTime}</strong> by <span style="color:var(--accent); font-weight:700;">${escapeHtml(entryBy)}</span> (${fmtInr(lastEntry.inr_amount)})`;
     }
 
     // Helpers to resolve Ops Manager and TL names cleanly to canonical DB names
@@ -231,6 +267,46 @@ async function load() {
         return resolveCanonicalName(name, dbTls) || String(name).trim();
     }
 
+    function resolveAgentName(name) {
+        if (!name) return '';
+        const clean = String(name).replace(/[\u00A0\u200B\u200E\u200F]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!clean || clean.toLowerCase().includes('unassigned')) return 'Unassigned';
+
+        // 1. Exact match (case-insensitive)
+        for (const a of dbAgents) {
+            const aName = (a.agent_name || a.name || '').trim();
+            if (aName.toLowerCase() === clean.toLowerCase()) return aName;
+            const ecode = (a.ecode || a.emp_id || '').trim();
+            if (ecode && ecode.toLowerCase() === clean.toLowerCase()) return aName;
+        }
+
+        // 2. Token / word matching
+        const inTokens = clean.toLowerCase().split(/[\s,.-]+/).filter(Boolean);
+        if (inTokens.length) {
+            for (const a of dbAgents) {
+                const aName = (a.agent_name || a.name || '').trim();
+                const aTokens = aName.toLowerCase().split(/[\s,.-]+/).filter(Boolean);
+                if (aTokens[0] === inTokens[0]) {
+                    if (inTokens.length === 1 || aTokens.length === 1) return aName;
+                    if (aTokens[aTokens.length - 1] === inTokens[inTokens.length - 1]) return aName;
+                }
+                if (inTokens.every(t => aTokens.includes(t)) || aTokens.every(t => inTokens.includes(t))) {
+                    return aName;
+                }
+            }
+        }
+
+        // 3. Fallback: prefix match
+        for (const a of dbAgents) {
+            const aName = (a.agent_name || a.name || '').trim();
+            const aLow = aName.toLowerCase();
+            const cLow = clean.toLowerCase();
+            if (aLow.startsWith(cLow) || cLow.startsWith(aLow)) return aName;
+        }
+
+        return toTitleCase(clean);
+    }
+
     // Populate months in dropdown if needed
     if (monthFilter.options.length <= 1) {
         const monthSet = new Set();
@@ -261,8 +337,28 @@ async function load() {
         monthFilter.value = 'overall';
     }
 
+    if (typeof getUserSetting === 'function') {
+        const savedFrom = getUserSetting('rev_fromDate', null);
+        const savedTo = getUserSetting('rev_toDate', null);
+        const savedMonth = getUserSetting('rev_month', null);
+        const savedFtd = getUserSetting('rev_ftd', null);
+        if (savedFrom && fromDate && !fromDate.value) fromDate.value = savedFrom;
+        if (savedTo && toDate && !toDate.value) toDate.value = savedTo;
+        if (savedMonth && monthFilter) monthFilter.value = savedMonth;
+        if (savedFtd && ftdDate && !ftdDate.value) ftdDate.value = savedFtd;
+    }
+
+    const selFrom = fromDate ? fromDate.value : '';
+    const selTo = toDate ? toDate.value : '';
     const selMonth = monthFilter.value;
     const selFtd = ftdDate.value;
+
+    if (typeof saveUserSetting === 'function') {
+        saveUserSetting('rev_fromDate', selFrom);
+        saveUserSetting('rev_toDate', selTo);
+        saveUserSetting('rev_month', selMonth);
+        saveUserSetting('rev_ftd', selFtd);
+    }
 
     let isNearEnd = false;
     let daysInMonth = 30;
@@ -293,9 +389,9 @@ async function load() {
         if (selMonth !== 'overall') {
             const [y, m] = selMonth.split('-').map(Number);
             const mName = new Date(y, m - 1, 1).toLocaleString('default', { month: 'short' });
-            const pctPassed = Math.min(100, Math.round((currentDayNum / daysInMonth) * 100));
-            paceBadge.innerHTML = `<span style="font-size:11px; font-weight:600; color:${isNearEnd ? 'var(--danger)' : 'var(--text-muted)'};">
-                ${mName} Day ${currentDayNum}/${daysInMonth} (${pctPassed}% elapsed)
+            const daysLeft = Math.max(0, daysInMonth - currentDayNum);
+            paceBadge.innerHTML = `<span style="font-size:11px; font-weight:600; color:${daysLeft <= 5 ? 'var(--danger)' : 'var(--text-muted)'};">
+                ${daysLeft} Days Remaining in ${mName} (Day ${currentDayNum} of ${daysInMonth})
             </span>`;
         } else {
             paceBadge.innerHTML = `<span style="font-size:11px; font-weight:600; color:var(--text-muted);">All Time Total</span>`;
@@ -367,14 +463,24 @@ async function load() {
     });
 
     dbAgents.forEach(a => {
-        const agName = (a.agent_name || a.name || '').toLowerCase().trim();
-        if (agName) {
-            if (a.tl || a.team_leader) agentToTl[agName] = resolveTlName(a.tl || a.team_leader);
-            if (a.ops_manager) agentToOps[agName] = resolveOpsName(a.ops_manager);
+        const rawAg = (a.agent_name || a.name || '').trim();
+        if (rawAg) {
+            const canonicalAg = toTitleCase(rawAg);
+            const key = canonicalAg.toLowerCase();
+            const tl = resolveTlName(a.tl || a.team_leader || '');
+            const ops = resolveOpsName(a.ops_manager || (tl && tlToOps[tl.toLowerCase()]) || '');
+            if (tl) agentToTl[key] = tl;
+            if (ops) agentToOps[key] = ops;
 
-            const realName = (a.agent_name || a.name || '').trim();
-            if (!agentMap[realName]) {
-                agentMap[realName] = { name: realName, mtd: 0, ftd: 0 };
+            if (!agentMap[key]) {
+                agentMap[key] = {
+                    name: canonicalAg,
+                    ecode: a.ecode || a.emp_id || getAgentEcode(canonicalAg),
+                    tl: tl || '-',
+                    opsManager: ops || '-',
+                    mtd: 0,
+                    ftd: 0
+                };
             }
         }
     });
@@ -387,15 +493,22 @@ async function load() {
         const mode = (p.payment_mode || 'P2P').trim();
         const comp = (p.received_in || 'Digital Verse').trim();
 
-        const isMtd = (selMonth === 'overall') || date.startsWith(selMonth);
+        let isMtd = false;
+        if (selFrom || selTo) {
+            isMtd = (!selFrom || date >= selFrom) && (!selTo || date <= selTo);
+        } else {
+            isMtd = (selMonth === 'overall') || date.startsWith(selMonth);
+        }
         const isFtd = (date === selFtd);
 
-        const agName = (p.agent_name || '').trim() || 'Unassigned';
+        const rawAg = (p.agent_name || '').trim() || 'Unassigned';
+        const agName = resolveAgentName(rawAg);
+        const agKey = agName.toLowerCase();
 
         // Resolve TL
         let rawTl = (p.tl || '').trim();
-        if (!rawTl && agName !== 'Unassigned') {
-            rawTl = agentToTl[agName.toLowerCase()] || '';
+        if (!rawTl && agKey !== 'unassigned') {
+            rawTl = agentToTl[agKey] || '';
         }
         let tlName = resolveTlName(rawTl) || rawTl;
         if (!tlName || tlName.toLowerCase().includes('unassigned')) {
@@ -404,7 +517,7 @@ async function load() {
 
         // Auto-create in tlMap if not present
         if (tlName !== 'Unassigned TL' && !tlMap[tlName]) {
-            const resolvedOps = resolveOpsName(p.ops_manager || agentToOps[agName.toLowerCase()] || tlToOps[tlName.toLowerCase()] || '');
+            const resolvedOps = resolveOpsName(p.ops_manager || agentToOps[agKey] || tlToOps[tlName.toLowerCase()] || '');
             tlMap[tlName] = {
                 name: tlName,
                 mtd: 0,
@@ -420,8 +533,8 @@ async function load() {
             if (tlName && tlName !== 'Unassigned TL' && tlToOps[tlName.toLowerCase()]) {
                 rawOps = tlToOps[tlName.toLowerCase()];
             }
-            if (!rawOps && agName !== 'Unassigned') {
-                rawOps = agentToOps[agName.toLowerCase()] || '';
+            if (!rawOps && agKey !== 'unassigned') {
+                rawOps = agentToOps[agKey] || '';
             }
         }
         let opsName = resolveOpsName(rawOps) || rawOps;
@@ -462,9 +575,20 @@ async function load() {
         }
 
         // Agent Sales
-        if (!agentMap[agName]) agentMap[agName] = { name: agName, mtd: 0, ftd: 0 };
-        if (isMtd) agentMap[agName].mtd += inr;
-        if (isFtd) agentMap[agName].ftd += inr;
+        if (!agentMap[agKey]) {
+            const resolvedTl = tlName !== 'Unassigned TL' ? tlName : (agentToTl[agKey] || '-');
+            const resolvedOps = opsName !== 'Unassigned Ops' ? opsName : (agentToOps[agKey] || '-');
+            agentMap[agKey] = {
+                name: agName,
+                ecode: p.ecode || getAgentEcode(agName),
+                tl: resolvedTl,
+                opsManager: resolvedOps,
+                mtd: 0,
+                ftd: 0
+            };
+        }
+        if (isMtd) agentMap[agKey].mtd += inr;
+        if (isFtd) agentMap[agKey].ftd += inr;
 
         // TL Sales
         if (tlMap[tlName]) {
@@ -504,26 +628,36 @@ async function load() {
     document.getElementById('kpiCompanySub').textContent = `DV: ${fmtUsdt(dvUsdt)} U | WK: ${fmtUsdt(wkUsdt)} U`;
 
     function renderTargetStatus(sales, target) {
-        if (!target || target <= 0) {
-            return `<span class="status-none">-</span>`;
+        if (!target || target <= 0) return `<span class="status-none">-</span>`;
+        const remaining = target - sales;
+        const daysLeft = Math.max(0, daysInMonth - currentDayNum);
+        if (remaining <= 0) {
+            return `<div style="display:flex; flex-direction:column; gap:2px; line-height:1.2;">
+                <span class="tag tag-success" style="font-size:10px; font-weight:700;">TARGET MET</span>
+                <small style="font-size:11px; color:var(--accent); font-weight:700;">+${fmtInrInt(Math.abs(remaining))} surplus</small>
+            </div>`;
         }
-        const pct = (sales / target) * 100;
-        const pctFormatted = Math.round(pct);
-
-        if (sales >= target) {
-            return `<span class="status-met">MET (${pctFormatted}%)</span>`;
-        } else {
-            if (isNearEnd) {
-                return `<span class="status-behind">BEHIND (${pctFormatted}%)</span>`;
-            } else {
-                return `<span class="status-progress">IN PROGRESS (${pctFormatted}%)</span>`;
-            }
-        }
+        const isBehind = isNearEnd && (sales < target * 0.7);
+        const statusBadge = isBehind 
+            ? `<span class="tag tag-danger" style="font-size:10px; font-weight:700;">BEHIND</span>`
+            : `<span class="tag tag-warning" style="font-size:10px; font-weight:700;">IN PROGRESS</span>`;
+        const perDayNeeded = daysLeft > 0 ? Math.round(remaining / daysLeft) : remaining;
+        return `<div style="display:flex; flex-direction:column; gap:3px; line-height:1.2;">
+            <div style="display:flex; align-items:center; gap:6px;">
+                ${statusBadge}
+                <strong style="color:var(--danger, #ef4444); font-size:11.5px;">${fmtInrInt(remaining)} remaining</strong>
+            </div>
+            <small style="font-size:11px; color:var(--text-muted);">${daysLeft} days left (${fmtInrInt(perDayNeeded)}/day)</small>
+        </div>`;
     }
 
     // 1. Render Agents Table
     window.allAgentsData = Object.values(agentMap).map(ag => {
-        return { ...ag, ecode: getAgentEcode(ag.name) };
+        return {
+            ...ag,
+            ecode: ag.ecode || getAgentEcode(ag.name),
+            tl: ag.tl && ag.tl !== '-' ? ag.tl : (agentToTl[ag.name.toLowerCase()] || '-')
+        };
     }).sort((a, b) => b.mtd - a.mtd);
     
     window.agentCurrentPage = 1;
@@ -533,7 +667,7 @@ async function load() {
         const searchVal = (document.getElementById('agentSearchFilter')?.value || '').toLowerCase();
         let filtered = window.allAgentsData;
         if (searchVal) {
-            filtered = filtered.filter(a => a.name.toLowerCase().includes(searchVal) || a.ecode.toLowerCase().includes(searchVal));
+            filtered = filtered.filter(a => a.name.toLowerCase().includes(searchVal) || a.ecode.toLowerCase().includes(searchVal) || (a.tl || '').toLowerCase().includes(searchVal));
         }
 
         const totalItems = filtered.length;
@@ -553,6 +687,7 @@ async function load() {
                 <td style="${rankColor} text-align: center;">${i + 1}</td>
                 <td style="color:var(--text-muted); font-family:var(--font-mono); text-align: left;">${ag.ecode}</td>
                 <td style="text-align: left;"><strong>${ag.name}</strong></td>
+                <td style="text-align: left; color:var(--text-muted);">${ag.tl || '-'}</td>
                 <td style="font-weight:700; ${i===0 ? 'color:var(--accent);':''} text-align: right;">${fmtInr(ag.mtd)}</td>
                 <td style="text-align: right;">${fmtInr(ag.ftd)}</td>
             </tr>`;
@@ -560,11 +695,9 @@ async function load() {
 
         const agentBody = document.getElementById('agentTableBody');
         const agentFoot = document.getElementById('agentTableFoot');
-        if (agentBody) agentBody.innerHTML = agentRows || '<tr><td colspan="5" class="text-muted" style="text-align:center; padding:18px;">No agents found.</td></tr>';
+        if (agentBody) agentBody.innerHTML = agentRows || '<tr><td colspan="6" class="text-muted" style="text-align:center; padding:18px;">No agents found.</td></tr>';
         if (agentFoot) agentFoot.innerHTML = `<tr>
-            <td style="text-align: left;"><strong>Grand Total</strong></td>
-            <td></td>
-            <td></td>
+            <td colspan="4" style="text-align: left;"><strong>Grand Total</strong></td>
             <td style="text-align: right; font-weight: 700;">${fmtInr(agentMtdTotal)}</td>
             <td style="text-align: right; font-weight: 700;">${fmtInr(agentFtdTotal)}</td>
         </tr>`;
@@ -600,22 +733,23 @@ async function load() {
         tlFtdTotal += tl.ftd;
         const target = tl.target || getRoleTarget('TL', tl.name);
         return `<tr>
-            <td style="color:var(--text-muted);">${i + 1}</td>
-            <td><strong>${tl.name}</strong></td>
-            <td style="font-weight:700;">${fmtInr(tl.mtd)}</td>
-            <td>${fmtInr(tl.ftd)}</td>
-            <td>${target > 0 ? fmtInrInt(target) : '-'}</td>
-            <td>${renderTargetStatus(tl.mtd, target)}</td>
+            <td style="color:var(--text-muted); text-align:center;">${i + 1}</td>
+            <td style="text-align:left;"><strong>${tl.name}</strong></td>
+            <td style="text-align:left; color:var(--text-muted);">${tl.opsManager || '-'}</td>
+            <td style="font-weight:700; text-align:right;">${fmtInr(tl.mtd)}</td>
+            <td style="text-align:right;">${fmtInr(tl.ftd)}</td>
+            <td style="text-align:right;">${target > 0 ? fmtInrInt(target) : '-'}</td>
+            <td style="text-align:left;">${renderTargetStatus(tl.mtd, target)}</td>
         </tr>`;
     }).join('');
 
     const tlBody = document.getElementById('tlTableBody');
     const tlFoot = document.getElementById('tlTableFoot');
-    if (tlBody) tlBody.innerHTML = tlRows || '<tr><td colspan="6" class="text-muted" style="text-align:center; padding:18px;">No TL records.</td></tr>';
+    if (tlBody) tlBody.innerHTML = tlRows || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:18px;">No TL records.</td></tr>';
     if (tlFoot) tlFoot.innerHTML = `<tr>
-        <td colspan="2">Grand Total</td>
-        <td>${fmtInr(tlMtdTotal)}</td>
-        <td>${fmtInr(tlFtdTotal)}</td>
+        <td colspan="3" style="text-align:left;"><strong>Grand Total</strong></td>
+        <td style="text-align:right; font-weight:700;">${fmtInr(tlMtdTotal)}</td>
+        <td style="text-align:right; font-weight:700;">${fmtInr(tlFtdTotal)}</td>
         <td colspan="2">-</td>
     </tr>`;
 
@@ -631,16 +765,16 @@ async function load() {
         const compSub = `DV: ${fmtInrInt(op.compMap['Digital Verse'] || 0)} | WK: ${fmtInrInt(op.compMap['World of Crypto'] || 0)}`;
 
         return `<tr>
-            <td style="color:var(--text-muted);">${i + 1}</td>
-            <td>
+            <td style="color:var(--text-muted); text-align:center;">${i + 1}</td>
+            <td style="text-align:left;">
                 <strong>${op.name}</strong>
                 <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${modeSub} &bull; ${compSub}</div>
             </td>
-            <td>${teamCount > 0 ? `${teamCount} Teams` : '-'}</td>
-            <td style="font-weight:700;">${fmtInr(op.mtd)}</td>
-            <td>${fmtInr(op.ftd)}</td>
-            <td>${target > 0 ? fmtInrInt(target) : '-'}</td>
-            <td>${renderTargetStatus(op.mtd, target)}</td>
+            <td style="text-align:left;">${teamCount > 0 ? `${teamCount} Teams` : '-'}</td>
+            <td style="font-weight:700; text-align:right;">${fmtInr(op.mtd)}</td>
+            <td style="text-align:right;">${fmtInr(op.ftd)}</td>
+            <td style="text-align:right;">${target > 0 ? fmtInrInt(target) : '-'}</td>
+            <td style="text-align:left;">${renderTargetStatus(op.mtd, target)}</td>
         </tr>`;
     }).join('');
 
@@ -648,28 +782,28 @@ async function load() {
     const opsFoot = document.getElementById('opsTableFoot');
     if (opsBody) opsBody.innerHTML = opsRows || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:18px;">No Ops records.</td></tr>';
     if (opsFoot) opsFoot.innerHTML = `<tr>
-        <td colspan="3">Grand Total</td>
-        <td>${fmtInr(opsMtdTotal)}</td>
-        <td>${fmtInr(opsFtdTotal)}</td>
+        <td colspan="3" style="text-align:left;"><strong>Grand Total</strong></td>
+        <td style="text-align:right; font-weight:700;">${fmtInr(opsMtdTotal)}</td>
+        <td style="text-align:right; font-weight:700;">${fmtInr(opsFtdTotal)}</td>
         <td colspan="2">-</td>
     </tr>`;
 
     // 4. Render Payment Mode Bifurcation
     const modeRows = Object.entries(modeMap).map(([mode, data]) => `<tr>
-        <td><strong>${mode}</strong></td>
-        <td>${fmtUsdt(data.usdt)} USDT</td>
-        <td style="font-weight:700; color:var(--accent);">${fmtInr(data.inr)}</td>
-        <td>${data.count}</td>
+        <td style="text-align:left;"><strong>${mode}</strong></td>
+        <td style="text-align:right;">${fmtUsdt(data.usdt)} USDT</td>
+        <td style="text-align:right; font-weight:700; color:var(--accent);">${fmtInr(data.inr)}</td>
+        <td style="text-align:center;">${data.count}</td>
     </tr>`).join('');
     const modeBody = document.getElementById('modeTableBody');
     if (modeBody) modeBody.innerHTML = modeRows || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:18px;">No transaction records found.</td></tr>';
 
     // 5. Render Company Bifurcation
     const compRows = Object.entries(compMap).map(([comp, data]) => `<tr>
-        <td><strong>${comp}</strong></td>
-        <td>${fmtUsdt(data.usdt)} USDT</td>
-        <td style="font-weight:700; color:var(--accent);">${fmtInr(data.inr)}</td>
-        <td>${data.count}</td>
+        <td style="text-align:left;"><strong>${comp}</strong></td>
+        <td style="text-align:right;">${fmtUsdt(data.usdt)} USDT</td>
+        <td style="text-align:right; font-weight:700; color:var(--accent);">${fmtInr(data.inr)}</td>
+        <td style="text-align:center;">${data.count}</td>
     </tr>`).join('');
     const compBody = document.getElementById('companyTableBody');
     if (compBody) compBody.innerHTML = compRows || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:18px;">No transaction records found.</td></tr>';
@@ -679,8 +813,15 @@ async function load() {
 applyBtn.onclick = load;
 
 clearBtn.onclick = () => {
+    if (fromDate) fromDate.value = '';
+    if (toDate) toDate.value = '';
     monthFilter.value = 'overall';
     ftdDate.value = new Date().toISOString().slice(0, 10);
+    if (typeof saveUserSetting === 'function') {
+        saveUserSetting('rev_fromDate', '');
+        saveUserSetting('rev_toDate', '');
+        saveUserSetting('rev_month', 'overall');
+    }
     load();
 };
 
@@ -696,8 +837,9 @@ if (exportExcelBtn) {
         if (sortedAgents) {
             const wsAgents = XLSX.utils.json_to_sheet(sortedAgents.map((a, i) => ({
                 'Rank': i + 1,
-                'Emp Code': getAgentEcode(a.name),
+                'Emp Code': a.ecode || getAgentEcode(a.name),
                 'Agent Name': a.name,
+                'Team Leader (TL)': a.tl || '-',
                 'MTD / Filter Sales (INR)': a.mtd,
                 'FTD Sales (INR)': a.ftd
             })));

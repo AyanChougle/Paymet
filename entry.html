@@ -6,7 +6,7 @@
     <title>Payment Entry | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=12">
+    <link rel="stylesheet" href="assets/css/app.css?v=13">
 </head>
 <body>
     <aside class="sidebar">
@@ -36,93 +36,70 @@
         </header>
 
         <form id="entryForm" class="panel form-grid" autocomplete="off">
+            <datalist id="agentList"></datalist>
+            <datalist id="clientListSuggestions"></datalist>
+
             <label>
                 Payment Date
                 <input name="payment_date" type="date" required>
             </label>
             <label>
                 Agent Name
-                <input name="agent_name" placeholder="Type to auto-fetch..." required>
+                <input name="agent_name" id="agent_name" list="agentList" placeholder="Select or type agent name..." required autocomplete="off">
             </label>
             <label>
                 E-Code
-                <input name="ecode" placeholder="Type to auto-fetch...">
+                <input name="ecode" id="ecode" placeholder="Auto-filled from agent" readonly style="background:var(--bg-lighter);">
             </label>
             <label>
                 Ops Manager
-                <input name="ops_manager" placeholder="Auto-filled from agent">
+                <input name="ops_manager" id="ops_manager" placeholder="Auto-filled from agent" readonly style="background:var(--bg-lighter);">
             </label>
             <label>
                 Team Leader (TL)
-                <input name="tl" placeholder="Auto-filled from agent">
+                <input name="tl" id="tl" placeholder="Auto-filled from agent" readonly style="background:var(--bg-lighter);">
             </label>
             <label>
+                Ratio
+                <select name="ratio" id="ratioSelect">
+                    <option value="100" selected>100</option>
+                    <option value="50/50">50/50</option>
+                </select>
+            </label>
+
+            <!-- Agent 2 Section for 50/50 Split -->
+            <div id="agent2Section" style="display:none; grid-column: 1 / -1; background: var(--bg-lighter); padding: 16px; border-radius: 6px; border: 1px dashed var(--border); margin: 6px 0;">
+                <h3 style="margin: 0 0 12px 0; font-size: 13.5px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px;">
+                    Agent 2 Details (50/50 Split Share)
+                </h3>
+                <div class="form-grid" style="margin: 0; padding: 0; border: none; background: transparent;">
+                    <label>
+                        Agent 2 Name
+                        <input name="agent2_name" id="agent2_name" list="agentList" placeholder="Select or type second agent..." autocomplete="off">
+                    </label>
+                    <label>
+                        Agent 2 E-Code
+                        <input name="agent2_ecode" id="agent2_ecode" placeholder="Auto-filled from agent" readonly style="background:var(--surface);">
+                    </label>
+                    <label>
+                        Agent 2 Ops Manager
+                        <input name="agent2_ops_manager" id="agent2_ops_manager" placeholder="Auto-filled from agent" readonly style="background:var(--surface);">
+                    </label>
+                    <label>
+                        Agent 2 Team Leader (TL)
+                        <input name="agent2_tl" id="agent2_tl" placeholder="Auto-filled from agent" readonly style="background:var(--surface);">
+                    </label>
+                </div>
+            </div>
+
+            <label>
                 Client Name
-                <input name="client_name" placeholder="Type to auto-fetch...">
+                <input name="client_name" id="client_name" list="clientListSuggestions" placeholder="Enter client name...">
             </label>
             <label>
                 Client Phone Number
                 <input name="client_number" id="client_number" type="tel" placeholder="10-digit mobile number" maxlength="10" autocomplete="tel">
                 <small style="font-size:11px; color:var(--text-muted); margin-top:2px; display:block;">10-digit Indian mobile (starts with 6, 7, 8, or 9)</small>
-            </label>
-            <label>
-                Email ID
-                <input name="email_id" id="email_id" type="email" placeholder="client@example.com" autocomplete="email">
-                <small style="font-size:11px; color:var(--text-muted); margin-top:2px; display:block;">Valid email (e.g. name@domain.com)</small>
-            </label>
-            <label>
-                PAN Number
-                <input name="pan_no" id="pan_no" placeholder="ABCDE1234F" style="text-transform:uppercase;" maxlength="10" autocomplete="off">
-                <small style="font-size:11px; color:var(--text-muted); margin-top:2px; display:block;">10-char PAN (5 letters, 4 digits, 1 letter)</small>
-            </label>
-            <label>
-                Aadhar Number
-                <input name="aadhar_no" id="aadhar_no" placeholder="12-digit Aadhar" maxlength="14" autocomplete="off">
-                <small style="font-size:11px; color:var(--text-muted); margin-top:2px; display:block;">12-digit UIDAI (XXXX XXXX XXXX)</small>
-            </label>
-            <label>
-                State / Region
-                <select name="state">
-                    <option value="">Select State / UT</option>
-                    <option value="Andhra Pradesh">Andhra Pradesh</option>
-                    <option value="Arunachal Pradesh">Arunachal Pradesh</option>
-                    <option value="Assam">Assam</option>
-                    <option value="Bihar">Bihar</option>
-                    <option value="Chhattisgarh">Chhattisgarh</option>
-                    <option value="Goa">Goa</option>
-                    <option value="Gujarat">Gujarat</option>
-                    <option value="Haryana">Haryana</option>
-                    <option value="Himachal Pradesh">Himachal Pradesh</option>
-                    <option value="Jharkhand">Jharkhand</option>
-                    <option value="Karnataka">Karnataka</option>
-                    <option value="Kerala">Kerala</option>
-                    <option value="Madhya Pradesh">Madhya Pradesh</option>
-                    <option value="Maharashtra">Maharashtra</option>
-                    <option value="Manipur">Manipur</option>
-                    <option value="Meghalaya">Meghalaya</option>
-                    <option value="Mizoram">Mizoram</option>
-                    <option value="Nagaland">Nagaland</option>
-                    <option value="Odisha">Odisha</option>
-                    <option value="Punjab">Punjab</option>
-                    <option value="Rajasthan">Rajasthan</option>
-                    <option value="Sikkim">Sikkim</option>
-                    <option value="Tamil Nadu">Tamil Nadu</option>
-                    <option value="Telangana">Telangana</option>
-                    <option value="Tripura">Tripura</option>
-                    <option value="Uttar Pradesh">Uttar Pradesh</option>
-                    <option value="Uttarakhand">Uttarakhand</option>
-                    <option value="West Bengal">West Bengal</option>
-                    <option value="Delhi">Delhi</option>
-                    <option value="Chandigarh">Chandigarh</option>
-                    <option value="Jammu and Kashmir">Jammu and Kashmir</option>
-                    <option value="Ladakh">Ladakh</option>
-                    <option value="Puducherry">Puducherry</option>
-                    <option value="Other">Other</option>
-                </select>
-            </label>
-            <label>
-                Ratio
-                <input name="ratio" placeholder="50/50 or 100">
             </label>
             <label>
                 Payment Mode
@@ -137,11 +114,11 @@
             </label>
             <label>
                 Divided By (Exchange Rate)
-                <input name="divided_by" type="number" step="0.000001" value="88" required>
+                <input name="divided_by" type="number" step="0.000001" value="88" readonly style="background:var(--bg-lighter); cursor:not-allowed;" required title="Exchange rate is locked to 88">
             </label>
             <label>
                 INR Amount (Calculated)
-                <input name="inr_amount" type="number" step="0.01" readonly placeholder="Auto-calculated (USDT * Rate)">
+                <input name="inr_amount" type="number" step="0.01" readonly placeholder="Auto-calculated (USDT * 88)" style="background:var(--bg-lighter); font-weight:700; color:var(--accent);">
             </label>
             <label>
                 Received In Company

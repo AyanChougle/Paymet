@@ -85,14 +85,14 @@
             const roleDisplay = isAdmin ? 'Admin' : (isOpsManager ? 'Ops Manager' : 'Entry User');
 
             wrap.innerHTML = `
-                <div>
-                    <label style="font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); font-weight:700;">
+                <div style="padding:4px 0;">
+                    <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.75px; color:var(--text-muted); font-weight:700; display:block; margin-bottom:2px;">
                         Logged in as
                     </label>
-                    <div style="font-size:13px; font-weight:600; color:var(--text); margin-top:2px;">${escapeHtml(user.name)}</div>
-                    <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(user.email)} &middot; <span style="color:var(--accent); font-weight:600;">${escapeHtml(roleDisplay)}</span></div>
+                    <div style="font-size:15px; font-weight:700; color:var(--text); line-height:1.3;">${escapeHtml(user.name)}</div>
+                    <div style="font-size:13px; color:var(--text-muted); margin-top:2px;">${escapeHtml(user.email)} &middot; <span style="color:var(--accent); font-weight:700;">${escapeHtml(roleDisplay)}</span></div>
                 </div>
-                <button id="logoutBtn" class="ghost danger" style="padding:6px; font-size:11.5px; width:100%; border-radius:4px; text-align:center;">Log Out</button>
+                <button id="logoutBtn" class="ghost danger" style="padding:8px 12px; font-size:12.5px; font-weight:600; width:100%; border-radius:4px; text-align:center;">Log Out</button>
             `;
 
             sidebarFooter.insertBefore(wrap, sidebarFooter.firstChild);
@@ -106,6 +106,39 @@
             };
         }
     }
+
+    // Global Title Case Helper
+    window.toTitleCase = function(str) {
+        if (!str) return '';
+        return String(str)
+            .toLowerCase()
+            .split(' ')
+            .map(word => word ? word.charAt(0).toUpperCase() + word.slice(1) : '')
+            .join(' ');
+    };
+
+    // Global User Settings Storage Helpers
+    window.getUserSetting = function(key, defaultVal = null) {
+        try {
+            const raw = localStorage.getItem('pp_user_settings');
+            if (!raw) return defaultVal;
+            const settings = JSON.parse(raw);
+            return settings[key] !== undefined ? settings[key] : defaultVal;
+        } catch(e) {
+            return defaultVal;
+        }
+    };
+
+    window.saveUserSetting = function(key, val) {
+        try {
+            const raw = localStorage.getItem('pp_user_settings');
+            const settings = raw ? JSON.parse(raw) : {};
+            settings[key] = val;
+            localStorage.setItem('pp_user_settings', JSON.stringify(settings));
+            // Asynchronously sync to backend if endpoint available
+            api('save_user_settings', { settings }).catch(() => {});
+        } catch(e) {}
+    };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initAuth);

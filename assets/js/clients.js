@@ -22,18 +22,53 @@ async function getClientsData() {
     }
 }
 
+const clientSearchInput = document.getElementById('clientSearchInput');
+
+function renderClientRows(clients) {
+    const q = (clientSearchInput?.value || '').toLowerCase().trim();
+    const filtered = clients.filter(c => {
+        if (!q) return true;
+        return (c.client_name || '').toLowerCase().includes(q) ||
+               (c.client_number || '').toLowerCase().includes(q) ||
+               (c.email_id || '').toLowerCase().includes(q) ||
+               (c.pan_no || '').toLowerCase().includes(q) ||
+               (c.aadhar_no || '').toLowerCase().includes(q) ||
+               (c.state || '').toLowerCase().includes(q);
+    });
+
+    list.innerHTML = filtered.map((c, idx) => {
+        const hasPan = c.pan_no && String(c.pan_no).trim().length > 0;
+        const hasAadhar = c.aadhar_no && String(c.aadhar_no).trim().length > 0;
+        const kycBadge = (!hasPan || !hasAadhar)
+            ? `<span class="tag tag-danger" style="font-size:11px; font-weight:700;">KYC Remaining</span>`
+            : `<span class="tag tag-success" style="font-size:11px; font-weight:700;">KYC Verified</span>`;
+
+        return `<tr>
+            <td><strong>${escapeHtml(c.client_name || '')}</strong></td>
+            <td>${escapeHtml(c.client_number || '-')}</td>
+            <td>${escapeHtml(c.email_id || '-')}</td>
+            <td><code>${escapeHtml(c.pan_no || '-')}</code></td>
+            <td><code>${escapeHtml(c.aadhar_no || '-')}</code></td>
+            <td>${escapeHtml(c.state || '-')}</td>
+            <td>${kycBadge}</td>
+            <td style="white-space:nowrap;">
+                <button class="ghost" style="padding:4px 8px; font-size:11px; margin-right:4px;" onclick="editClient(${c.id || 0})">Edit</button>
+                <button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteClient(${c.id || 0}, '${(c.client_number||'').replace(/'/g, "\\'")}', '${(c.client_name||'').replace(/'/g, "\\'")}')">Delete</button>
+            </td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="8" class="text-muted" style="text-align:center; padding:20px;">No matching clients found.</td></tr>';
+}
+
+if (clientSearchInput) {
+    clientSearchInput.addEventListener('input', () => {
+        renderClientRows(cachedClients);
+    });
+}
+
 async function render() {
     // 1. Render Registered Clients
     const clients = await getClientsData();
-    list.innerHTML = clients.map((c, idx) => `<tr>
-        <td><strong>${escapeHtml(c.client_name || '')}</strong></td>
-        <td>${escapeHtml(c.client_number || '-')}</td>
-        <td>${escapeHtml(c.email_id || '-')}</td>
-        <td><code>${escapeHtml(c.pan_no || '-')}</code></td>
-        <td><code>${escapeHtml(c.aadhar_no || '-')}</code></td>
-        <td>${escapeHtml(c.state || '-')}</td>
-        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteClient(${c.id || 0}, '${(c.client_number||'').replace(/'/g, "\\'")}', '${(c.client_name||'').replace(/'/g, "\\'")}')">Delete</button></td>
-    </tr>`).join('') || '<tr><td colspan="7" class="text-muted" style="text-align:center; padding:20px;">No registered clients found.</td></tr>';
+    renderClientRows(clients);
 
     // 2. Render Paid Clients Breakdown (Sheet 3 from Excel)
     const dash = await api('dashboard', {}).catch(() => ({ rawPayments: [] }));
@@ -106,6 +141,49 @@ window.deleteClient = async function(id, clientNumber, clientName) {
             alert('Failed to delete client: ' + e.message);
         }
     }
+};
+
+window.editClient = function(id) {
+    const c = cachedClients.find(item => Number(item.id) === Number(id));
+    if (!c) {
+        alert('Client not found.');
+        return;
+    }
+
+    const idInput = document.getElementById('c_client_id');
+    const nameInput = document.getElementById('c_client_name');
+    const numInput = document.getElementById('c_client_number');
+    const emailInput = document.getElementById('c_email_id');
+    const panInput = document.getElementById('c_pan_no');
+    const aadharInput = document.getElementById('c_aadhar_no');
+    const stateInput = document.getElementById('c_state');
+    const submitBtn = document.getElementById('submitClientBtn');
+    const cancelBtn = document.getElementById('cancelEditBtn');
+
+    if (idInput) idInput.value = c.id || '';
+    if (nameInput) nameInput.value = c.client_name || '';
+    if (numInput) numInput.value = c.client_number || '';
+    if (emailInput) emailInput.value = c.email_id || '';
+    if (panInput) panInput.value = c.pan_no || '';
+    if (aadharInput) aadharInput.value = formatClientAadhar(c.aadhar_no || '');
+    if (stateInput) stateInput.value = c.state || '';
+
+    if (submitBtn) submitBtn.textContent = 'Update Client Profile';
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+    nameInput?.focus();
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+window.cancelClientEdit = function() {
+    const idInput = document.getElementById('c_client_id');
+    const submitBtn = document.getElementById('submitClientBtn');
+    const cancelBtn = document.getElementById('cancelEditBtn');
+
+    if (idInput) idInput.value = '';
+    form.reset();
+    if (submitBtn) submitBtn.textContent = 'Save Client Profile';
+    if (cancelBtn) cancelBtn.style.display = 'none';
 };
 
 // ========================================================
@@ -219,8 +297,8 @@ form.onsubmit = async e => {
 
     try {
         await api('upsert_client_node', data);
-        msg.textContent = 'Client profile saved successfully!';
-        form.reset();
+        msg.textContent = data.id ? 'Client profile updated successfully!' : 'Client profile saved successfully!';
+        cancelClientEdit();
         await render();
         setTimeout(() => msg.textContent = '', 3500);
     } catch(err) {

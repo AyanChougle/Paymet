@@ -7,7 +7,7 @@
     <title>Clients Directory & Paid Clients | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=12">
+    <link rel="stylesheet" href="assets/css/app.css?v=13">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 
@@ -16,7 +16,8 @@
         <div class="brand">PAYMENT<span>PORTAL</span></div>
         <nav>
             <a href="dashboard.html">Dashboard</a>
-            <a href="revenue.html">Revenue Overview</a>`n <a href="entry.html">Payment Entry</a>
+            <a href="revenue.html">Revenue Overview</a>
+ <a href="entry.html">Payment Entry</a>
             <a href="reports.html">Payment Reports</a>
             <a href="agents.html">Agents</a>
             <a class="active" href="clients.html">Clients</a>
@@ -77,6 +78,7 @@
                 <h2>Add / Update Client Profile</h2>
             </div>
             <form id="clientForm" class="form-grid" autocomplete="off">
+                <input type="hidden" name="id" id="c_client_id">
                 <label>Client Name<input name="client_name" id="c_client_name" placeholder="Enter Client Name" required></label>
                 <label>Client Phone Number
                     <input name="client_number" id="c_client_number" type="tel" placeholder="10-digit mobile" maxlength="10" required>
@@ -95,7 +97,7 @@
                     <small style="font-size:11px; color:var(--text-muted); display:block; margin-top:2px;">12-digit UIDAI (XXXX XXXX XXXX)</small>
                 </label>
                 <label>State / Region
-                    <select name="state">
+                    <select name="state" id="c_state">
                         <option value="">Select State / UT</option>
                         <option value="Andhra Pradesh">Andhra Pradesh</option>
                         <option value="Arunachal Pradesh">Arunachal Pradesh</option>
@@ -134,7 +136,8 @@
                     </select>
                 </label>
                 <div class="wide" style="display:flex; align-items:center; gap:12px;">
-                    <button type="submit" class="primary">Save Client Profile</button>
+                    <button type="submit" id="submitClientBtn" class="primary">Save Client Profile</button>
+                    <button type="button" id="cancelEditBtn" class="ghost" style="display:none;" onclick="cancelClientEdit()">Cancel Edit</button>
                     <span id="msg" style="color:var(--accent); font-weight:600;"></span>
                 </div>
             </form>
@@ -143,7 +146,13 @@
         <!-- Clients Master List -->
         <section class="panel">
             <div class="panel-head">
-                <h2>Registered Client Directory</h2>
+                <div>
+                    <h2>Registered Client Directory</h2>
+                    <p class="panel-sub">Manage client directory, KYC verification status, and profile updates</p>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="text" id="clientSearchInput" placeholder="Search name, phone, PAN, Aadhar..." style="min-width:260px; padding:6px 12px; font-size:12px;">
+                </div>
             </div>
             <div class="table-wrap">
                 <table>
@@ -155,7 +164,8 @@
                             <th>PAN No</th>
                             <th>Aadhar No</th>
                             <th>State</th>
-                            <th style="width:80px;">Action</th>
+                            <th>KYC Status</th>
+                            <th style="width:110px;">Action</th>
                         </tr>
                     </thead>
                     <tbody id="clientList"></tbody>

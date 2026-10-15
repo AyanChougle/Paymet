@@ -1,23 +1,84 @@
 const f = document.getElementById('entryForm');
 const msg = document.getElementById('entryMsg');
+const ratioSelect = document.getElementById('ratioSelect');
+const agent2Section = document.getElementById('agent2Section');
+const agentList = document.getElementById('agentList');
+const clientListSuggestions = document.getElementById('clientListSuggestions');
 
 // Default date to today
 f.payment_date.value = new Date().toISOString().slice(0, 10);
+f.divided_by.value = '88';
 
-// Auto compute INR amount
+// Auto compute INR amount (locked exchange rate 88)
 function computeInr() {
     const u = parseFloat(f.usdt.value || 0);
-    const d = parseFloat(f.divided_by.value || 0);
+    const d = 88;
+    f.divided_by.value = '88';
     const total = u * d;
     f.inr_amount.value = total > 0 ? total.toFixed(2) : '';
 }
 
 f.usdt.addEventListener('input', computeInr);
-f.divided_by.addEventListener('input', computeInr);
+
+// Handle 50/50 Ratio toggle
+function onRatioChange() {
+    if (ratioSelect.value === '50/50') {
+        agent2Section.style.display = 'block';
+        f.agent2_name.required = true;
+    } else {
+        agent2Section.style.display = 'none';
+        f.agent2_name.required = false;
+        f.agent2_name.value = '';
+        f.agent2_ecode.value = '';
+        f.agent2_ops_manager.value = '';
+        f.agent2_tl.value = '';
+    }
+}
+ratioSelect.addEventListener('change', onRatioChange);
+
+// Title case helper
+function toTitleCase(str) {
+    if (!str) return '';
+    return String(str)
+        .toLowerCase()
+        .split(' ')
+        .map(word => word ? word.charAt(0).toUpperCase() + word.slice(1) : '')
+        .join(' ');
+}
 
 // In-memory cache loaded from live DB
 let dbAgents = [];
 let dbClients = [];
+
+function populateSuggestions() {
+    if (!agentList) return;
+    agentList.innerHTML = '';
+    // Only suggest active agents (is_active !== 0)
+    const activeAgents = dbAgents.filter(a => a.is_active !== 0 && a.is_active !== false && a.is_active !== '0');
+    activeAgents.forEach(a => {
+        const name = toTitleCase((a.agent_name || a.name || '').trim());
+        const ecode = (a.ecode || a.emp_id || '').trim();
+        if (name) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.label = ecode ? `${ecode} — ${name}` : name;
+            agentList.appendChild(opt);
+        }
+    });
+
+    if (clientListSuggestions && dbClients.length) {
+        clientListSuggestions.innerHTML = '';
+        dbClients.forEach(c => {
+            const cName = toTitleCase((c.client_name || '').trim());
+            if (cName) {
+                const opt = document.createElement('option');
+                opt.value = cName;
+                if (c.client_number) opt.label = `${cName} (${c.client_number})`;
+                clientListSuggestions.appendChild(opt);
+            }
+        });
+    }
+}
 
 async function initEntryData() {
     let apiSucceeded = false;
@@ -40,40 +101,116 @@ async function initEntryData() {
         localStorage.setItem('pp_mappings', JSON.stringify(dbAgents));
         localStorage.setItem('pp_clients', JSON.stringify(dbClients));
     }
+    populateSuggestions();
 }
 initEntryData();
 
-// Agent auto-fetch
-function autofillAgent(key, value) {
-    if (!value) return;
-    const mappings = dbAgents.length ? dbAgents : JSON.parse(localStorage.getItem('pp_agents') || localStorage.getItem('pp_mappings') || '[]');
-    const match = mappings.find(m => (m[key] || '').toLowerCase() === value.toLowerCase());
-    if (match) {
-        if (key !== 'ecode') f.ecode.value = match.ecode || '';
-        if (key !== 'agent_name') f.agent_name.value = match.agent_name || '';
-        if (match.ops_manager) f.ops_manager.value = match.ops_manager;
-        if (match.tl) f.tl.value = match.tl;
+// Helper to find agent record by name or ecode from registered active agents
+function findAgentMatch(query, exactOnly = false) {
+    if (!query) return null;
+    const clean = query.trim().toLowerCase();
+    const activeAgents = dbAgents.filter(a => a.is_active !== 0 && a.is_active !== false && a.is_active !== '0');
+
+    // 1. Exact match on agent_name or ecode
+    for (const a of activeAgents) {
+        const aName = (a.agent_name || a.name || '').trim().toLowerCase();
+        const aCode = (a.ecode || a.emp_id || '').trim().toLowerCase();
+        if (aName === clean || (aCode && aCode === clean)) {
+            return a;
+        }
     }
+
+    if (exactOnly) return null;
+
+    // 2. Exact match ignoring punctuation/extra spaces
+    const cleanAlpha = clean.replace(/[^a-z0-9]/g, '');
+    if (cleanAlpha.length >= 2) {
+        for (const a of activeAgents) {
+            const aAlpha = (a.agent_name || a.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const cAlpha = (a.ecode || a.emp_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (aAlpha === cleanAlpha || (cAlpha && cAlpha === cleanAlpha)) {
+                return a;
+            }
+        }
+    }
+
+    // 3. Starts-with or token match (user typed partial name or code)
+    if (clean.length >= 3) {
+        for (const a of activeAgents) {
+            const aName = (a.agent_name || a.name || '').trim().toLowerCase();
+            const aCode = (a.ecode || a.emp_id || '').trim().toLowerCase();
+            if (aName.startsWith(clean) || (aCode && aCode.startsWith(clean))) {
+                return a;
+            }
+        }
+        for (const a of activeAgents) {
+            const aName = (a.agent_name || a.name || '').trim().toLowerCase();
+            if (aName.includes(clean)) {
+                return a;
+            }
+        }
+    }
+
+    return null;
 }
 
-// Client auto-fetch
-function autofillClient(key, value) {
-    if (!value) return;
-    const clients = dbClients.length ? dbClients : JSON.parse(localStorage.getItem('pp_clients') || '[]');
-    const match = clients.find(c => (c[key] || '').toLowerCase() === value.toLowerCase());
+// Agent 1 Auto-fill
+function autofillAgent1(e) {
+    const val = f.agent_name.value.trim();
+    if (!val) {
+        f.ecode.value = '';
+        f.ops_manager.value = '';
+        f.tl.value = '';
+        return;
+    }
+    const isInput = e && e.type === 'input';
+    const match = isInput ? findAgentMatch(val, true) : findAgentMatch(val, false);
     if (match) {
-        if (key !== 'client_name' && match.client_name) f.client_name.value = match.client_name;
-        if (key !== 'client_number' && match.client_number) f.client_number.value = match.client_number;
-        if (key !== 'email_id' && match.email_id) f.email_id.value = match.email_id;
-        if (match.pan_no) f.pan_no.value = match.pan_no;
-        if (match.aadhar_no) f.aadhar_no.value = match.aadhar_no;
-        if (match.state) f.state.value = match.state;
+        if (!isInput) {
+            f.agent_name.value = toTitleCase(match.agent_name || match.name);
+        }
+        f.ecode.value = match.ecode || match.emp_id || '';
+        f.ops_manager.value = toTitleCase(match.ops_manager || '');
+        f.tl.value = toTitleCase(match.tl || match.team_leader || '');
+    } else if (!isInput) {
+        f.ecode.value = '';
+        f.ops_manager.value = '';
+        f.tl.value = '';
     }
 }
+f.agent_name.addEventListener('input', autofillAgent1);
+f.agent_name.addEventListener('change', autofillAgent1);
+f.agent_name.addEventListener('blur', autofillAgent1);
 
-// ========================================================
-// REAL-TIME KYC INPUT FORMATTERS & VALIDATORS
-// ========================================================
+// Agent 2 Auto-fill (for 50/50 ratio)
+function autofillAgent2(e) {
+    const val = f.agent2_name.value.trim();
+    if (!val) {
+        f.agent2_ecode.value = '';
+        f.agent2_ops_manager.value = '';
+        f.agent2_tl.value = '';
+        return;
+    }
+    const isInput = e && e.type === 'input';
+    const match = isInput ? findAgentMatch(val, true) : findAgentMatch(val, false);
+    if (match) {
+        if (!isInput) {
+            f.agent2_name.value = toTitleCase(match.agent_name || match.name);
+        }
+        f.agent2_ecode.value = match.ecode || match.emp_id || '';
+        f.agent2_ops_manager.value = toTitleCase(match.ops_manager || '');
+        f.agent2_tl.value = toTitleCase(match.tl || match.team_leader || '');
+    } else if (!isInput) {
+        f.agent2_ecode.value = '';
+        f.agent2_ops_manager.value = '';
+        f.agent2_tl.value = '';
+    }
+}
+f.agent2_name.addEventListener('input', autofillAgent2);
+f.agent2_name.addEventListener('change', autofillAgent2);
+f.agent2_name.addEventListener('blur', autofillAgent2);
+
+// Client phone formatting & auto-fill
 function formatClientPhone(val) {
     if (!val) return '';
     let digits = val.replace(/\D/g, '');
@@ -85,149 +222,200 @@ function formatClientPhone(val) {
     return digits.slice(0, 10);
 }
 
-function formatClientAadhar(val) {
-    if (!val) return '';
-    const digits = val.replace(/\D/g, '').slice(0, 12);
-    const parts = [];
-    for (let i = 0; i < digits.length; i += 4) {
-        parts.push(digits.slice(i, i + 4));
-    }
-    return parts.join(' ');
-}
-
-function formatClientPan(val) {
-    if (!val) return '';
-    return val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-}
-
-// Attach real-time formatting listeners
 f.client_number.addEventListener('input', () => {
     f.client_number.value = formatClientPhone(f.client_number.value);
-    autofillClient('client_number', f.client_number.value.trim());
+    const num = f.client_number.value.trim();
+    if (num.length >= 10) {
+        const found = dbClients.find(c => c.client_number === num);
+        if (found && !f.client_name.value) {
+            f.client_name.value = toTitleCase(found.client_name || '');
+        }
+    }
 });
 
-f.pan_no.addEventListener('input', () => {
-    f.pan_no.value = formatClientPan(f.pan_no.value);
+f.client_name.addEventListener('change', () => {
+    f.client_name.value = toTitleCase(f.client_name.value);
+    const cleanName = f.client_name.value.trim().toLowerCase();
+    if (cleanName) {
+        const found = dbClients.find(c => (c.client_name || '').toLowerCase() === cleanName);
+        if (found && found.client_number && !f.client_number.value) {
+            f.client_number.value = found.client_number;
+        }
+    }
 });
 
-f.aadhar_no.addEventListener('input', () => {
-    f.aadhar_no.value = formatClientAadhar(f.aadhar_no.value);
-});
-
-f.email_id.addEventListener('blur', () => {
-    f.email_id.value = f.email_id.value.trim().toLowerCase();
-});
-
-f.ecode.addEventListener('input', () => autofillAgent('ecode', f.ecode.value.trim()));
-f.agent_name.addEventListener('input', () => autofillAgent('agent_name', f.agent_name.value.trim()));
-f.client_name.addEventListener('input', () => autofillClient('client_name', f.client_name.value.trim()));
-f.email_id.addEventListener('input', () => autofillClient('email_id', f.email_id.value.trim()));
-
-// Submission with Strict Rules Verification
+// ========================================================
+// PAYMENT SUBMISSION HANDLER
+// ========================================================
 f.onsubmit = async (e) => {
     e.preventDefault();
     msg.textContent = '';
     msg.className = '';
 
-    const data = Object.fromEntries(new FormData(f));
+    // Enforce 88 divided_by
+    f.divided_by.value = '88';
+    computeInr();
 
-    // Clean & Normalize
-    data.client_number = formatClientPhone(data.client_number || '');
-    data.pan_no = formatClientPan(data.pan_no || '');
-    const rawAadhar = (data.aadhar_no || '').replace(/\D/g, '');
-    data.aadhar_no = rawAadhar;
-    data.email_id = (data.email_id || '').trim().toLowerCase();
+    const ag1Name = f.agent_name.value.trim();
+    const ag1Match = findAgentMatch(ag1Name);
 
-    // 1. Phone validation (Indian 10-digit mobile starting with 6-9)
-    if (data.client_number) {
-        if (!/^[6-9]\d{9}$/.test(data.client_number)) {
+    // Rule: No new agents should be created!
+    if (!ag1Match) {
+        msg.className = 'error';
+        msg.textContent = `Agent "${ag1Name}" is not registered in the database. Only existing active agents can be selected.`;
+        f.agent_name.focus();
+        return;
+    }
+
+    const ratio = ratioSelect.value;
+    let ag2Match = null;
+
+    if (ratio === '50/50') {
+        const ag2Name = f.agent2_name.value.trim();
+        if (!ag2Name) {
             msg.className = 'error';
-            msg.textContent = 'Client phone number must be a valid 10-digit mobile number starting with 6, 7, 8, or 9.';
+            msg.textContent = 'Please select Agent 2 for the 50/50 split ratio.';
+            f.agent2_name.focus();
+            return;
+        }
+        ag2Match = findAgentMatch(ag2Name);
+        if (!ag2Match) {
+            msg.className = 'error';
+            msg.textContent = `Agent 2 "${ag2Name}" is not registered in the database.`;
+            f.agent2_name.focus();
+            return;
+        }
+        if (ag1Match.agent_name.toLowerCase() === ag2Match.agent_name.toLowerCase()) {
+            msg.className = 'error';
+            msg.textContent = 'Agent 1 and Agent 2 cannot be the same person for a 50/50 split.';
+            f.agent2_name.focus();
+            return;
+        }
+    }
+
+    // Phone validation
+    const clientNumber = formatClientPhone(f.client_number.value || '');
+    if (clientNumber) {
+        if (!/^[6-9]\d{9}$/.test(clientNumber)) {
+            msg.className = 'error';
+            msg.textContent = 'Client phone number must be a valid 10-digit Indian mobile number.';
             f.client_number.focus();
             return;
         }
     }
 
-    // 2. PAN validation (5 letters, 4 digits, 1 letter)
-    if (data.pan_no && !data.pan_no.includes('*')) {
-        if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(data.pan_no)) {
-            msg.className = 'error';
-            msg.textContent = 'PAN Card must be exactly 10 characters in the format ABCDE1234F (5 letters, 4 digits, 1 letter).';
-            f.pan_no.focus();
-            return;
-        }
-    }
-
-    // 3. Aadhar validation (12 numeric digits, not all identical)
-    if (rawAadhar && !rawAadhar.includes('*')) {
-        if (rawAadhar.length !== 12) {
-            msg.className = 'error';
-            msg.textContent = 'Aadhar Card must be exactly 12 numeric digits.';
-            f.aadhar_no.focus();
-            return;
-        }
-        if (/^(\d)\1{11}$/.test(rawAadhar)) {
-            msg.className = 'error';
-            msg.textContent = 'Invalid Aadhar Number: cannot consist of all identical digits.';
-            f.aadhar_no.focus();
-            return;
-        }
-    }
-
-    // 4. Email validation
-    if (data.email_id) {
-        if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(data.email_id)) {
-            msg.className = 'error';
-            msg.textContent = 'Please provide a valid email address (e.g. name@domain.com).';
-            f.email_id.focus();
-            return;
-        }
-    }
-
-    // 5. Amount validation
-    const usdt = parseFloat(data.usdt || 0);
-    const div = parseFloat(data.divided_by || 0);
-    if (usdt <= 0) {
+    const totalUsdt = parseFloat(f.usdt.value || 0);
+    if (totalUsdt <= 0) {
         msg.className = 'error';
         msg.textContent = 'USDT amount must be greater than zero.';
         f.usdt.focus();
         return;
     }
-    if (div <= 0) {
-        msg.className = 'error';
-        msg.textContent = 'Divided By (Exchange Rate) must be greater than zero.';
-        f.divided_by.focus();
-        return;
-    }
+
+    const totalInr = parseFloat(f.inr_amount.value || (totalUsdt * 88));
+    const paymentDate = f.payment_date.value;
+    const paymentMode = f.payment_mode.value;
+    const receivedIn = f.received_in.value;
+    const clientName = toTitleCase(f.client_name.value.trim());
+    const remarks = f.remarks.value.trim();
+
+    const u = (typeof getCurrentUser === 'function' ? getCurrentUser() : null) || JSON.parse(sessionStorage.getItem('pp_user') || 'null');
+    const createdByName = u ? (u.name || u.username) : 'Admin';
 
     try {
-        await api('create_payment', data);
+        if (ratio === '50/50') {
+            // Split into two individual payment records (each agent gets 50% single employee credit)
+            const halfUsdt = parseFloat((totalUsdt / 2).toFixed(6));
+            const halfInr = parseFloat((totalInr / 2).toFixed(2));
 
-        // Auto-save client directly to MySQL if new
-        if (data.client_name || data.client_number) {
+            const entry1 = {
+                payment_date: paymentDate,
+                agent_name: toTitleCase(ag1Match.agent_name || ag1Match.name),
+                ecode: ag1Match.ecode || ag1Match.emp_id || '',
+                ops_manager: toTitleCase(ag1Match.ops_manager || ''),
+                tl: toTitleCase(ag1Match.tl || ag1Match.team_leader || ''),
+                client_name: clientName,
+                client_number: clientNumber,
+                ratio: '50/50',
+                payment_mode: paymentMode,
+                usdt: halfUsdt,
+                divided_by: 88,
+                inr_amount: halfInr,
+                received_in: receivedIn,
+                created_by_name: createdByName,
+                remarks: remarks ? `${remarks} (50% Split with ${toTitleCase(ag2Match.agent_name)})` : `50% Split with ${toTitleCase(ag2Match.agent_name)}`
+            };
+
+            const entry2 = {
+                payment_date: paymentDate,
+                agent_name: toTitleCase(ag2Match.agent_name || ag2Match.name),
+                ecode: ag2Match.ecode || ag2Match.emp_id || '',
+                ops_manager: toTitleCase(ag2Match.ops_manager || ''),
+                tl: toTitleCase(ag2Match.tl || ag2Match.team_leader || ''),
+                client_name: clientName,
+                client_number: clientNumber,
+                ratio: '50/50',
+                payment_mode: paymentMode,
+                usdt: halfUsdt,
+                divided_by: 88,
+                inr_amount: halfInr,
+                received_in: receivedIn,
+                created_by_name: createdByName,
+                remarks: remarks ? `${remarks} (50% Split with ${toTitleCase(ag1Match.agent_name)})` : `50% Split with ${toTitleCase(ag1Match.agent_name)}`
+            };
+
+            await Promise.all([
+                api('create_payment', entry1),
+                api('create_payment', entry2)
+            ]);
+        } else {
+            // 100% single payment
+            const entry = {
+                payment_date: paymentDate,
+                agent_name: toTitleCase(ag1Match.agent_name || ag1Match.name),
+                ecode: ag1Match.ecode || ag1Match.emp_id || '',
+                ops_manager: toTitleCase(ag1Match.ops_manager || ''),
+                tl: toTitleCase(ag1Match.tl || ag1Match.team_leader || ''),
+                client_name: clientName,
+                client_number: clientNumber,
+                ratio: '100',
+                payment_mode: paymentMode,
+                usdt: totalUsdt,
+                divided_by: 88,
+                inr_amount: totalInr,
+                received_in: receivedIn,
+                created_by_name: createdByName,
+                remarks: remarks
+            };
+            await api('create_payment', entry);
+        }
+
+        // Save client to directory if provided
+        if (clientName || clientNumber) {
             try {
                 await api('upsert_client_node', {
-                    client_name: data.client_name || 'Unknown Client',
-                    client_number: data.client_number || '',
-                    email_id: data.email_id || '',
-                    pan_no: data.pan_no || '',
-                    aadhar_no: data.aadhar_no || '',
-                    state: data.state || ''
+                    client_name: clientName || 'Unknown Client',
+                    client_number: clientNumber || ''
                 });
             } catch(e) {}
         }
 
         msg.className = '';
-        msg.textContent = 'Payment recorded successfully!';
+        msg.textContent = ratio === '50/50' 
+            ? 'Payments recorded successfully! Split 50/50 for both agents.' 
+            : 'Payment recorded successfully!';
+
         f.reset();
         f.payment_date.value = new Date().toISOString().slice(0, 10);
         f.divided_by.value = '88';
+        ratioSelect.value = '100';
+        onRatioChange();
         f.payment_mode.value = 'P2P';
         f.received_in.value = 'Digital Verse';
 
-        setTimeout(() => msg.textContent = '', 4000);
-    } catch (err) {
+        setTimeout(() => { msg.textContent = ''; }, 4500);
+    } catch(err) {
         msg.className = 'error';
-        msg.textContent = err.message || 'Failed to save payment';
+        msg.textContent = err.message || 'Failed to record payment.';
     }
 };

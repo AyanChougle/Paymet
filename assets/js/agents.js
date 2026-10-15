@@ -317,7 +317,8 @@ async function loadData() {
             ecode: a.ecode || a.emp_id || '',
             agent_name: (a.agent_name || a.name || '').trim(),
             ops_manager: resolveOpsName(a.ops_manager || ''),
-            tl: resolveTlName(a.tl || a.team_leader || '')
+            tl: resolveTlName(a.tl || a.team_leader || ''),
+            is_active: (a.is_active === 0 || a.is_active === '0') ? 0 : 1
         }));
     } else if (!apiSucceeded) {
         mappings = getMappings();
@@ -331,7 +332,8 @@ async function loadData() {
                         ecode: p.ecode || '',
                         agent_name: name,
                         ops_manager: resolveOpsName(p.ops_manager || ''),
-                        tl: resolveTlName(p.tl || '')
+                        tl: resolveTlName(p.tl || ''),
+                        is_active: 1
                     });
                     known.add(name.toLowerCase());
                 }
@@ -747,6 +749,12 @@ function renderAllAgentsTable(mappings) {
         totalSales += (m.monthSales || 0);
         totalTx += (m.txCount || 0);
         const originalIndex = mappings.findIndex(orig => orig.agent_name === m.agent_name);
+        const isActive = (m.is_active !== 0 && m.is_active !== '0');
+        const statusBadge = isActive 
+            ? `<span class="tag tag-success" style="font-size:11px; font-weight:700;">Active</span>`
+            : `<span class="tag tag-muted" style="font-size:11px; font-weight:700;">Inactive</span>`;
+        const toggleBtnText = isActive ? 'Deactivate' : 'Activate';
+        const toggleBtnClass = isActive ? 'ghost danger' : 'ghost';
 
         return `<tr>
             <td style="color:var(--text-muted);">${idx + 1}</td>
@@ -756,20 +764,23 @@ function renderAllAgentsTable(mappings) {
             <td>${m.tl ? `<span style="color:var(--text-muted);">${m.tl}</span>` : '<span class="status-none">Unassigned</span>'}</td>
             <td style="font-weight:700; ${m.monthSales > 0 ? 'color:var(--accent);' : ''}">${fmtInr(m.monthSales || 0)}</td>
             <td>${m.txCount || 0}</td>
-            <td style="text-align: right;">
-                <button class="ghost" style="padding:4px 10px; font-size:11px; margin-right:4px;" onclick="editAgent(${originalIndex})">Edit</button>
+            <td style="text-align: center;">${statusBadge}</td>
+            <td style="text-align: right; white-space: nowrap;">
+                <button class="${toggleBtnClass}" style="padding:4px 8px; font-size:11px; margin-right:4px;" onclick="toggleAgentStatus(${originalIndex})">${toggleBtnText}</button>
+                <button class="ghost" style="padding:4px 8px; font-size:11px; margin-right:4px;" onclick="editAgent(${originalIndex})">Edit</button>
                 <button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteAgent(${originalIndex})">Delete</button>
             </td>
         </tr>`;
     }).join('');
 
-    list.innerHTML = rows || '<tr><td colspan="8" class="text-muted" style="text-align:center; padding:24px;">No agents found.</td></tr>';
+    list.innerHTML = rows || '<tr><td colspan="9" class="text-muted" style="text-align:center; padding:24px;">No agents found.</td></tr>';
     
     if (foot) {
         foot.innerHTML = `<tr>
             <td colspan="5">Grand Total (${filtered.length} Agents)</td>
             <td style="font-weight:700; color:var(--accent);">${fmtInr(totalSales)}</td>
             <td>${totalTx} txs</td>
+            <td>-</td>
             <td>-</td>
         </tr>`;
     }
@@ -967,6 +978,29 @@ window.deleteAgent = async function(idx) {
             await loadData();
         } catch(err) {
             alert(err.message);
+        }
+    }
+};
+
+window.toggleAgentStatus = async function(idx) {
+    const m = cachedMappings[idx];
+    if (!m) return;
+    const currentActive = (m.is_active !== 0 && m.is_active !== '0');
+    const newActive = currentActive ? 0 : 1;
+    const actionLabel = currentActive ? 'deactivate' : 'activate';
+
+    if (confirm(`Are you sure you want to ${actionLabel} agent "${m.agent_name}"?`)) {
+        try {
+            await api('toggle_agent_status', {
+                id: m.id || 0,
+                agent_name: m.agent_name,
+                is_active: newActive
+            });
+            m.is_active = newActive;
+            saveMappings(cachedMappings);
+            renderAllAgentsTable(cachedMappings);
+        } catch (err) {
+            alert('Failed to update agent status: ' + err.message);
         }
     }
 };
