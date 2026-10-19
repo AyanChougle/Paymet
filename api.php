@@ -1879,7 +1879,12 @@ if ($action === 'bulk_import') {
 
         $existingKeys = [];
         try {
-            $st = $pdo->query("SELECT payment_date, ecode, agent_name, client_number, client_name, usdt, inr_amount, payment_mode, received_in FROM pp_payments");
+            $pCols = get_table_cols($pdo, 'pp_payments');
+            $sel = ['payment_date'];
+            foreach (['ecode', 'agent_name', 'client_number', 'client_name', 'usdt', 'inr_amount', 'payment_mode', 'received_in'] as $f) {
+                if (in_array($f, $pCols, true)) $sel[] = "`$f`";
+            }
+            $st = $pdo->query("SELECT " . implode(', ', $sel) . " FROM pp_payments");
             while ($r = $st->fetch()) {
                 $k = implode('|', [
                     substr((string)($r['payment_date'] ?? ''), 0, 10),
