@@ -214,23 +214,61 @@ const impNum = v => {
 const impPad = n => String(n).padStart(2, '0');
 function impDate(v) {
     if (v == null || v === '') return null;
-    if (typeof v === 'number') {                       // Excel serial day number
-        const d = new Date(Math.round((Math.floor(v) - 25569) * 86400000));
+    if (v instanceof Date && !isNaN(v.getTime())) {
+        return `${v.getFullYear()}-${impPad(v.getMonth() + 1)}-${impPad(v.getDate())}`;
+    }
+    const num = (typeof v === 'number') ? v : (/^\d+(\.\d+)?$/.test(String(v).trim()) ? parseFloat(String(v).trim()) : null);
+    if (num !== null && num > 20000 && num < 80000) { // Excel serial day number
+        const d = new Date(Math.round((Math.floor(num) - 25569) * 86400000));
         return `${d.getUTCFullYear()}-${impPad(d.getUTCMonth() + 1)}-${impPad(d.getUTCDate())}`;
     }
     const s = String(v).trim();
     let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (m) return `${m[1]}-${impPad(m[2])}-${impPad(m[3])}`;
-    m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/);
-    if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${impPad(m[2])}-${impPad(m[1])}`;
+    m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if (m) return `${m[3]}-${impPad(m[2])}-${impPad(m[1])}`;
+    m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})/);
+    if (m) return `20${m[3]}-${impPad(m[2])}-${impPad(m[1])}`;
     return null;
 }
 function impValidDate(iso) {
     if (!iso) return false;
-    const [y, m, d] = iso.split('-').map(Number);
+    const parts = iso.split('-').map(Number);
+    if (parts.length !== 3) return false;
+    const [y, m, d] = parts;
+    if (!y || !m || !d || y < 2000 || y > 2100) return false;
     const t = new Date(Date.UTC(y, m - 1, d));
     return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
 }
+
+const IMPORT_HEADER_ALIASES = {
+    date: ['date', 'paymentdate', 'payment_date', 'entrydate', 'txndate'],
+    agentname: ['agentname', 'agent_name', 'agent', 'representative', 'name'],
+    usdt: ['usdt', 'usdtamount', 'usdt_amount'],
+    inramount: ['inramount', 'inr_amount', 'amount', 'inr', 'totalinr'],
+    ecode: ['ecode', 'e_code', 'empid', 'emp_id', 'agentcode'],
+    empid: ['empid', 'emp_id', 'ecode', 'e_code'],
+    tlname: ['tlname', 'tl', 'teamleader', 'teamleadername', 'tl_name', 'team_leader'],
+    tl: ['tl', 'tlname', 'teamleader', 'teamleadername', 'tl_name', 'team_leader'],
+    opsmanager: ['opsmanager', 'ops_manager', 'ops', 'manager', 'opsmanagername'],
+    clientname: ['clientname', 'client_name', 'client', 'customer', 'customername'],
+    clientnumber: ['clientnumber', 'client_number', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact'],
+    emailid: ['emailid', 'email_id', 'email', 'mail'],
+    paymentmode: ['paymentmode', 'payment_mode', 'mode', 'method', 'type'],
+    dividedby: ['dividedby', 'divided_by', 'rate', 'fxrate', 'ratio'],
+    ratio: ['ratio', 'rate', 'dividedby', 'divided_by'],
+    panno: ['panno', 'pan_no', 'pan'],
+    aadharno: ['aadharno', 'aadhar_no', 'aadhar', 'adhaar'],
+    state: ['state', 'location', 'region'],
+    receivedcompany: ['receivedcompany', 'received_company', 'receivedin', 'received_in', 'company'],
+    receivedin: ['receivedin', 'received_in', 'receivedcompany', 'received_company', 'company'],
+    monthlytarget: ['monthlytarget', 'monthly_target', 'target', 'targetamount'],
+    target: ['target', 'monthlytarget', 'monthly_target', 'targetamount'],
+    opsmanagername: ['opsmanagername', 'opsmanager', 'ops_manager', 'managername', 'name'],
+    teamleadername: ['teamleadername', 'teamleader', 'tlname', 'tl', 'leadername', 'name'],
+    reportingto: ['reportingto', 'reporting_to', 'reportinglevel1', 'reporting_level_1', 'parent', 'opsmanager', 'ops_manager'],
+    reportinglevel1: ['reportinglevel1', 'reporting_level_1', 'reportingto', 'reporting_to', 'parent', 'opsmanager', 'ops_manager']
+};
 
 // Find a sheet by name (ignores case/punctuation), return its rows as arrays
 function impSheet(wb, names) {
@@ -251,7 +289,7 @@ function scanStackedSections(allRows) {
         const s = row.map(c => impNorm(c)).join(' ');
 
         let sig = null;
-        if (s.includes('date') && s.includes('usdt') && (s.includes('inr') || s.includes('amount'))) {
+        if ((s.includes('date') || s.includes('paymentdate')) && s.includes('usdt') && (s.includes('inr') || s.includes('amount'))) {
             sig = 'payments';
         } else if ((s.includes('agentname') || s.includes('agent')) && (s.includes('empid') || s.includes('ecode'))) {
             sig = 'agents';
@@ -277,9 +315,15 @@ function scanStackedSections(allRows) {
 function makeColMap(headerCells, required = [], optional = []) {
     const cells = (headerCells || []).map(impNorm);
     const col = {};
-    [...required, ...optional].forEach(h => {
-        const i = cells.indexOf(h);
-        if (i >= 0) col[h] = i;
+    [...required, ...optional].forEach(canonicalKey => {
+        const aliases = IMPORT_HEADER_ALIASES[canonicalKey] || [canonicalKey];
+        for (const alias of aliases) {
+            const idx = cells.indexOf(impNorm(alias));
+            if (idx >= 0) {
+                col[canonicalKey] = idx;
+                break;
+            }
+        }
     });
     return col;
 }
@@ -287,11 +331,14 @@ function makeColMap(headerCells, required = [], optional = []) {
 // Locate the header row (first 35 rows) that contains every required header
 function impTable(sheet, required, optional = []) {
     for (let r = 0; r < Math.min(sheet.rows.length, 35); r++) {
-        const cells = (sheet.rows[r] || []).map(impNorm);
-        if (required.every(h => cells.includes(h))) {
-            const col = {};
-            [...required, ...optional].forEach(h => { const i = cells.indexOf(h); if (i >= 0) col[h] = i; });
-            return { headerRow: r, col, rows: sheet.rows.slice(r + 1).map((cells, i) => ({ cells, rowNo: r + i + 2 })) };
+        const col = makeColMap(sheet.rows[r], required, optional);
+        const allReqFound = required.every(h => col[h] != null);
+        if (allReqFound) {
+            return {
+                headerRow: r,
+                col,
+                rows: sheet.rows.slice(r + 1).map((cells, i) => ({ cells, rowNo: r + i + 2 }))
+            };
         }
     }
     return null;
@@ -351,16 +398,31 @@ async function parseMasterWorkbook(wb, report) {
     const out = { payments: [], agents: [], ops: [], tls: [], clients: [] };
     const err = (sheet, rowNo, msg) => report.errors.push(`${sheet} row ${rowNo}: ${msg}`);
 
-    // Check if sections are stacked in a single sheet or CSV
+    // Check if sections are stacked in a single sheet or CSV.
+    // Multi-sheet workbooks (like Master Portal Backups) have dedicated sheets and must NOT trigger stacked mode!
     let stacked = null;
-    for (const shName of wb.SheetNames) {
-        const sh = wb.Sheets[shName];
-        if (!sh) continue;
-        const rows2d = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', raw: true });
-        const found = scanStackedSections(rows2d);
-        if (found.payments || found.agents || found.ops || found.tls) {
-            stacked = found;
-            break;
+    if (wb.SheetNames.length === 1) {
+        const sh = wb.Sheets[wb.SheetNames[0]];
+        if (sh) {
+            const rows2d = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', raw: true });
+            const found = scanStackedSections(rows2d);
+            const count = (found.payments ? 1 : 0) + (found.agents ? 1 : 0) + (found.ops ? 1 : 0) + (found.tls ? 1 : 0) + (found.clients ? 1 : 0);
+            if (count >= 2) {
+                stacked = found;
+            }
+        }
+    } else {
+        // Multi-sheet workbook: only activate stacked mode if a specific sheet contains 2 or more distinct stacked sections
+        for (const shName of wb.SheetNames) {
+            const sh = wb.Sheets[shName];
+            if (!sh) continue;
+            const rows2d = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', raw: true });
+            const found = scanStackedSections(rows2d);
+            const count = (found.payments ? 1 : 0) + (found.agents ? 1 : 0) + (found.ops ? 1 : 0) + (found.tls ? 1 : 0) + (found.clients ? 1 : 0);
+            if (count >= 2) {
+                stacked = found;
+                break;
+            }
         }
     }
 
@@ -392,7 +454,7 @@ async function parseMasterWorkbook(wb, report) {
         }
     } else {
         // A. Check for separate Ops Manager sheet
-        const opsSheet = impSheet(wb, ['Ops Manager', 'Ops Managers', 'OPS', 'Sheet6', 'Sheet 6']);
+        const opsSheet = impSheet(wb, ['Ops Managers', 'Ops Manager', 'OPS', 'Operations Managers', 'Operations Manager', 'Sheet3', 'Sheet 3', 'Sheet6', 'Sheet 6']);
         if (opsSheet) {
             for (let r = 0; r < Math.min(opsSheet.rows.length, 15); r++) {
                 const cells = (opsSheet.rows[r] || []).map(impNorm);
@@ -413,7 +475,7 @@ async function parseMasterWorkbook(wb, report) {
         }
 
         // B. Check for separate Team Leader sheet
-        const tlSheet = impSheet(wb, ['Team Leader', 'Team Leaders', 'TL', 'Sheet5', 'Sheet 5']);
+        const tlSheet = impSheet(wb, ['Team Leaders', 'Team Leader', 'TL', 'TLs', 'Sheet4', 'Sheet 4', 'Sheet5', 'Sheet 5']);
         if (tlSheet) {
             for (let r = 0; r < Math.min(tlSheet.rows.length, 15); r++) {
                 const cells = (tlSheet.rows[r] || []).map(impNorm);
@@ -497,7 +559,16 @@ async function parseMasterWorkbook(wb, report) {
             out.agents.push(a);
         }
     } else {
-        const agentsSheet = impSheet(wb, ['Agents Directory', 'Agents', 'Agent Directory', 'Sheet3', 'Sheet 3']);
+        let agentsSheet = impSheet(wb, ['Agents Directory', 'Agents', 'Agent Directory', 'Agent', 'Agents List', 'Sheet2', 'Sheet 2', 'Sheet3', 'Sheet 3']);
+        if (!agentsSheet) {
+            for (const shName of wb.SheetNames) {
+                const candidate = impSheet(wb, [shName]);
+                if (candidate && impTable(candidate, ['empid', 'agentname'])) {
+                    agentsSheet = candidate;
+                    break;
+                }
+            }
+        }
         if (agentsSheet) {
             const t = impTable(agentsSheet, ['empid', 'agentname'], ['opsmanager', 'teamleader', 'tl']);
             if (t) {
@@ -522,8 +593,25 @@ async function parseMasterWorkbook(wb, report) {
     // STEP 3: CLIENTS DIRECTORY & KYC
     // ==========================================
     const clientMap = new Map();
+    const sanitizePan = p => {
+        if (!p) return '';
+        const s = String(p).trim().toUpperCase();
+        if (/mail|consent|received|test|none|null|pending|#|n\/a/i.test(s)) {
+            return /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(s) ? s : '';
+        }
+        const cleaned = s.replace(/[^A-Z0-9*]/g, '').slice(0, 10);
+        if (cleaned.length < 10) return '';
+        return /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(cleaned) || cleaned.includes('*') ? cleaned : '';
+    };
+    const sanitizeAadhar = a => {
+        if (!a) return '';
+        const s = String(a).replace(/\D/g, '').slice(0, 12);
+        return s.length === 12 ? s : '';
+    };
     const addClient = (c, source) => {
         if (!c.client_name && !c.client_number) return;
+        c.pan_no = sanitizePan(c.pan_no);
+        c.aadhar_no = sanitizeAadhar(c.aadhar_no);
         const key = c.client_number ? 'n:' + c.client_number.toLowerCase().replace(/[^0-9]/g, '') : 'c:' + c.client_name.toLowerCase();
         const prev = clientMap.get(key);
         if (!prev) { clientMap.set(key, { ...c }); return; }
@@ -549,7 +637,7 @@ async function parseMasterWorkbook(wb, report) {
         }
     } else {
         const clientSheetCandidates = [
-            ['Clients Directory'], ['Clients KYC Directory'], ['Clients KYC'], ['Clients'], 
+            ['Clients KYC Directory'], ['Clients KYC'], ['Clients Directory & KYC'], ['Clients Directory'], ['Clients'], ['Client KYC Directory'], 
             ['Client Directory'], ['KYC Directory'], ['KYC'], ['Sheet1'], ['Sheet 1'], ['Sheet4'], ['Sheet 4']
         ];
         for (const names of clientSheetCandidates) {
@@ -587,7 +675,16 @@ async function parseMasterWorkbook(wb, report) {
             ['ecode', 'tlname', 'tl', 'opsmanager', 'clientname', 'clientnumber', 'emailid', 'paymentmode', 'ratio', 'panno', 'aadharno', 'state', 'receivedcompany', 'receivedin']);
         paySheetName = 'Payments';
     } else {
-        const pSheet = impSheet(wb, ['Payment Sheet', 'Payments (Live DB)', 'Payments', 'Payment', 'Sheet2', 'Sheet 2']);
+        let pSheet = impSheet(wb, ['Payment Import', 'Payment Sheet', 'Payments Import', 'Payments (Live DB)', 'Payments', 'Payment', 'Source Data (Corrected)', 'Source Data', 'Sheet1', 'Sheet 1', 'Sheet2', 'Sheet 2']);
+        if (!pSheet) {
+            for (const shName of wb.SheetNames) {
+                const candidate = impSheet(wb, [shName]);
+                if (candidate && impTable(candidate, ['date', 'agentname', 'usdt', 'inramount'])) {
+                    pSheet = candidate;
+                    break;
+                }
+            }
+        }
         if (!pSheet) throw new Error('Could not find Payment data in workbook. Use Master Portal Backup or CSV format.');
         paySheetName = pSheet.name;
         const pt = impTable(pSheet, ['date', 'agentname', 'usdt', 'inramount'],
@@ -624,16 +721,19 @@ async function parseMasterWorkbook(wb, report) {
         let agent = impClean(g('agentname'));
         let ops = resolveOps(g('opsmanager'));
         let tl = resolveTl(g('tlname') || g('tl'));
-        const ecode = impClean(g('ecode'));
+        let ecode = impClean(g('ecode'));
 
         if (!ecode && !agent) { err(paySheetName, row.rowNo, 'E-Code or Agent Name is required'); continue; }
 
         const dir = (ecode ? agentByCode[ecode.toLowerCase()] : null) || (agent ? agentByName[agent.toLowerCase()] : null);
         if (dir) {
-            if (dir.name !== agent || (dir.ops_manager && dir.ops_manager !== ops) || (dir.tl && dir.tl !== tl)) report.normalised++;
-            agent = dir.name;
-            ops = dir.ops_manager || ops;
-            tl = dir.tl || tl;
+            if ((dir.name && dir.name !== agent) || (dir.ecode && dir.ecode !== ecode) || (dir.ops_manager && dir.ops_manager !== ops) || (dir.tl && dir.tl !== tl)) {
+                report.normalised++;
+            }
+            if (dir.name) agent = dir.name;
+            if (dir.ecode) ecode = dir.ecode;
+            if (dir.ops_manager) ops = dir.ops_manager;
+            if (dir.tl) tl = dir.tl;
         }
 
         const rawNum = impClean(g('clientnumber'));
@@ -649,7 +749,7 @@ async function parseMasterWorkbook(wb, report) {
         const p = {
             payment_date: date,
             ecode: ecode || (dir ? dir.ecode : ''),
-            agent_name: agent || (dir ? dir.name : 'Unassigned Agent'),
+            agent_name: agent || (dir ? dir.name : (ecode || 'Unassigned Agent')),
             tl: tl || '',
             ops_manager: ops || '',
             client_name: impClean(g('clientname')),
@@ -699,7 +799,15 @@ async function executeMasterImport(wb, sourceLabel) {
     const exClients = (await api('clients', {}).catch(() => ({ rows: [] }))).rows || [];
     for (const c of data.clients) {
         const old = exClients.find(x => (c.client_number && x.client_number === c.client_number) || (!c.client_number && x.client_name && x.client_name.toLowerCase() === c.client_name.toLowerCase()));
-        if (old) for (const f of ['client_name', 'email_id', 'pan_no', 'aadhar_no', 'state']) if (!c[f] && old[f] && !String(old[f]).includes('*')) c[f] = old[f];
+        if (old) {
+            for (const f of ['client_name', 'email_id', 'pan_no', 'aadhar_no', 'state']) {
+                if (!c[f] && old[f] && !String(old[f]).includes('*')) {
+                    c[f] = old[f];
+                }
+            }
+        }
+        c.pan_no = sanitizePan(c.pan_no);
+        c.aadhar_no = sanitizeAadhar(c.aadhar_no);
     }
 
     const lines = [
@@ -913,7 +1021,7 @@ if (exportBackupBtn) {
 if (clearAllBtn) {
     clearAllBtn.onclick = async function() {
         const confirmed = confirm(
-            "⚠️ ATTENTION: COMPLETE SYSTEM & DATABASE WIPE\n\n" +
+            "[WARNING] ATTENTION: COMPLETE SYSTEM & DATABASE WIPE\n\n" +
             "This action will permanently wipe ALL data across the entire platform, including:\n" +
             "• All Payment Transactions & History\n" +
             "• All Accounts Handover Ledger entries\n" +
@@ -972,7 +1080,7 @@ if (clearAllBtn) {
                 : '';
 
             alert(
-                "✅ ALL SYSTEM DATA WIPED SUCCESSFULLY!\n\n" +
+                "[SUCCESS] ALL SYSTEM DATA WIPED SUCCESSFULLY!\n\n" +
                 "1. Safety backup spreadsheet (.xlsx) was downloaded to your computer:\n   " + backupFilename + "\n" +
                 serverMsg + "\n" +
                 "3. Live MySQL database tables and browser storage caches were wiped clean.\n" +

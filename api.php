@@ -84,6 +84,11 @@ function err($msg, $statusCode = 400) {
     exit;
 }
 
+function is_local_env(): bool {
+    $h = $_SERVER['HTTP_HOST'] ?? '';
+    return in_array($h, ['localhost', '127.0.0.1', '::1'], true) || strpos($h, 'localhost:') === 0;
+}
+
 $pdo = null;
 $lastError = '';
 if ($db_user === '' || $db_name === '') {
@@ -244,13 +249,37 @@ function require_role(array $allowedRoles) {
 }
 
 // Rate Limiting on Login: shared server-side store (cannot be bypassed by dropping the session cookie)
-const LOGIN_MAX_FAILS = 5;
-const LOGIN_WINDOW_SEC = 900;
-const LOGIN_LOCK_SEC = 900;
+const LOGIN_MAX_FAILS = 10;
+const LOGIN_WINDOW_SEC = 300;
+const LOGIN_LOCK_SEC = 180;
+
+function get_client_ip(): string {
+    $headers = [
+        'HTTP_CF_CONNECTING_IP',
+        'HTTP_X_FORWARDED_FOR',
+        'HTTP_X_REAL_IP',
+        'REMOTE_ADDR'
+    ];
+    foreach ($headers as $h) {
+        if (!empty($_SERVER[$h])) {
+            $ips = explode(',', $_SERVER[$h]);
+            $clientIp = trim($ips[0]);
+            if (filter_var($clientIp, FILTER_VALIDATE_IP)) {
+                return $clientIp;
+            }
+        }
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+}
 
 function login_keys(string $account): array {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    return ['ip:' . hash('sha256', $ip), 'acct:' . hash('sha256', strtolower(trim($account)))];
+    $ip = get_client_ip();
+    $keys = [];
+    if (!empty($account)) {
+        $keys[] = 'acct:' . hash('sha256', strtolower(trim($account)));
+    }
+    $keys[] = 'ip:' . hash('sha256', $ip);
+    return $keys;
 }
 
 function login_limiter_init(PDO $pdo): void {
@@ -351,7 +380,19 @@ function clean_aadhar(?string $aadhar): string {
 
 function clean_pan(?string $pan): string {
     if (!$pan) return '';
-    return substr(strtoupper(preg_replace('/[^A-Za-z0-9*]/', '', $pan)), 0, 10);
+    $val = trim((string)$pan);
+    // Ignore placeholder, error or descriptive strings (e.g. '#N/A', 'MAIL CONSENT RECEIVED', 'NONE', 'N/A', etc.)
+    if (preg_match('/(mail|consent|received|test|none|null|pending|na|n\/a|#)/i', $val)) {
+        if (!preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/', strtoupper($val))) {
+            return '';
+        }
+    }
+    $cleaned = substr(strtoupper(preg_replace('/[^A-Za-z0-9*]/', '', $val)), 0, 10);
+    // A valid Indian PAN card must be exactly 10 alphanumeric characters (or masked with *)
+    if (strlen($cleaned) < 10) {
+        return '';
+    }
+    return $cleaned;
 }
 
 function validate_kyc_rules(string $phone, string $pan, string $aadhar, string $email, bool $requirePhone = false): ?string {
@@ -488,23 +529,6 @@ function get_all_ops_managers(PDO $pdo): array {
         }
     } catch (Throwable $e) {}
 
-    // Ensure authoritative monthly targets are guaranteed
-    foreach ($ops as &$o) {
-        if ($o['target'] <= 0) {
-            $nLow = strtolower($o['name']);
-            if (strpos($nLow, 'rushikesh') !== false) {
-                $o['target'] = 3500000;
-                $o['monthly_target'] = 3500000;
-                if ($o['id'] > 0) @$pdo->exec("UPDATE pp_ops_managers SET target=3500000, monthly_target=3500000 WHERE id=" . (int)$o['id']);
-            } elseif (strpos($nLow, 'arshad') !== false) {
-                $o['target'] = 3500000;
-                $o['monthly_target'] = 3500000;
-                if ($o['id'] > 0) @$pdo->exec("UPDATE pp_ops_managers SET target=3500000, monthly_target=3500000 WHERE id=" . (int)$o['id']);
-            }
-        }
-    }
-    unset($o);
-
     return $ops;
 }
 
@@ -630,39 +654,16 @@ function get_all_team_leaders(PDO $pdo): array {
         }
     } catch (Throwable $e) {}
 
-    // Ensure authoritative monthly targets are guaranteed
-    foreach ($tls as &$t) {
-        if ($t['target'] <= 0) {
-            $nLow = strtolower($t['name']);
-            if (strpos($nLow, 'mayur') !== false) {
-                $t['target'] = 1500000;
-                $t['monthly_target'] = 1500000;
-                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1500000, monthly_target=1500000 WHERE id=" . (int)$t['id']);
-            } elseif (strpos($nLow, 'viren') !== false) {
-                $t['target'] = 1750000;
-                $t['monthly_target'] = 1750000;
-                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1750000, monthly_target=1750000 WHERE id=" . (int)$t['id']);
-            } elseif (strpos($nLow, 'ritik') !== false) {
-                $t['target'] = 1500000;
-                $t['monthly_target'] = 1500000;
-                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1500000, monthly_target=1500000 WHERE id=" . (int)$t['id']);
-            } elseif (strpos($nLow, 'saif') !== false) {
-                $t['target'] = 1750000;
-                $t['monthly_target'] = 1750000;
-                if ($t['id'] > 0) @$pdo->exec("UPDATE pp_team_leaders SET target=1750000, monthly_target=1750000 WHERE id=" . (int)$t['id']);
-            }
-        }
-    }
-    unset($t);
-
     return $tls;
 }
 
 // ========================================================
 // REQUEST ROUTING
 // ========================================================
-$action = $_GET['action'] ?? '';
-$data = json_decode(file_get_contents('php://input'), true) ?: [];
+$action = $_GET['action'] ?? $_POST['action'] ?? '';
+$rawBody = file_get_contents('php://input');
+$jsonBody = json_decode($rawBody, true);
+$data = is_array($jsonBody) ? array_merge($_POST, $jsonBody) : array_merge($_POST, $_GET);
 
 try {
 // 0. HEALTH CHECK
@@ -762,7 +763,284 @@ if ($action === 'login') {
     err('Invalid email/username or password.');
 }
 
-// 2. LOGOUT (AUTHENTICATED)
+// 2. FORGOT PASSWORD (REQUEST RESET LINK / CODE VIA MAIL)
+if ($action === 'forgot_password') {
+    $rawInput = clean_str($data['email'] ?? $data['username'] ?? '', 150);
+    if (empty($rawInput)) {
+        err('Please provide your registered email address or username.');
+    }
+
+    // Rate-limit forgot password requests per IP & account to avoid spam
+    $ip = get_client_ip();
+    $throttleKey = 'pwd_reset:' . hash('sha256', $ip . ':' . strtolower($rawInput));
+    $pdo->exec("CREATE TABLE IF NOT EXISTS pp_password_resets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        email VARCHAR(150) NOT NULL,
+        token VARCHAR(80) NOT NULL UNIQUE,
+        otp_code VARCHAR(10) NOT NULL,
+        expires_at INT NOT NULL,
+        used INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_token (token),
+        INDEX idx_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // Check recent request in last 60 seconds
+    $recentSt = $pdo->prepare("SELECT COUNT(*) FROM pp_password_resets WHERE email = ? AND expires_at > ? AND used = 0");
+    $recentSt->execute([strtolower($rawInput), time()]);
+    $recentCount = (int)$recentSt->fetchColumn();
+    if ($recentCount >= 3) {
+        err('Too many password reset requests. Please wait a few minutes before trying again.', 429);
+    }
+
+    // Locate user by email, username, or name
+    $foundUser = null;
+    try {
+        $st = $pdo->prepare("SELECT * FROM pp_users WHERE LOWER(TRIM(COALESCE(email, ''))) = LOWER(?) OR LOWER(TRIM(COALESCE(username, ''))) = LOWER(?) OR LOWER(TRIM(COALESCE(full_name, ''))) = LOWER(?) OR LOWER(TRIM(COALESCE(name, ''))) = LOWER(?) LIMIT 1");
+        $st->execute([$rawInput, $rawInput, $rawInput, $rawInput]);
+        $foundUser = $st->fetch();
+    } catch (Throwable $e) {}
+
+    // For privacy, always report success to the frontend even if user doesn't exist
+    if (!$foundUser) {
+        out(['message' => 'If an account exists with that email address, a password reset link has been sent.']);
+    }
+
+    $destEmail = trim((string)($foundUser['email'] ?? ''));
+    if (empty($destEmail) || !filter_var($destEmail, FILTER_VALIDATE_EMAIL)) {
+        // Fallback if email was stored in username or full_name
+        $fName = trim((string)($foundUser['full_name'] ?? $foundUser['name'] ?? ''));
+        if (filter_var($fName, FILTER_VALIDATE_EMAIL)) {
+            $destEmail = $fName;
+        } else {
+            out(['message' => 'If an account exists with that email address, a password reset link has been sent.']);
+        }
+    }
+
+    $userId = (int)$foundUser['id'];
+    $userName = trim((string)($foundUser['full_name'] ?? $foundUser['name'] ?? $foundUser['username'] ?? 'User'));
+
+    // Invalidate prior unused tokens for this user
+    try {
+        $pdo->prepare("UPDATE pp_password_resets SET used = 1 WHERE user_id = ? AND used = 0")->execute([$userId]);
+    } catch (Throwable $e) {}
+
+    // Generate cryptographically secure token & 6-digit OTP code
+    $token = bin2hex(random_bytes(24));
+    $otp = (string)random_int(100000, 999999);
+    $expiresAt = time() + 1800; // 30 minutes validity
+
+    $ins = $pdo->prepare("INSERT INTO pp_password_resets (user_id, email, token, otp_code, expires_at) VALUES (?, ?, ?, ?, ?)");
+    $ins->execute([$userId, strtolower($destEmail), $token, $otp, $expiresAt]);
+
+    // Build Reset URL
+    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443) ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'zipcar.in';
+    $resetUrl = "{$proto}://{$host}/reset-password.html?token=" . urlencode($token);
+
+    // Compose HTML Email
+    $subject = "Password Reset Request - Payment Portal";
+    $mailHeaders = [
+        'MIME-Version: 1.0',
+        'Content-type: text/html; charset=utf-8',
+        'From: Payment Portal <no-reply@' . preg_replace('/^www\./i', '', $host) . '>',
+        'X-Mailer: PHP/' . phpversion()
+    ];
+
+    $htmlBody = '<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
+            .container { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            h2 { margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 700; }
+            p { font-size: 14.5px; line-height: 1.6; color: #475569; margin: 12px 0; }
+            .btn-wrap { margin: 24px 0; text-align: center; }
+            .btn { display: inline-block; padding: 13px 26px; background-color: #0284c7; color: #ffffff !important; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px; }
+            .otp-box { background: #f1f5f9; padding: 14px 20px; border-radius: 6px; font-family: monospace; font-size: 22px; font-weight: 700; letter-spacing: 4px; text-align: center; margin: 18px 0; color: #0f172a; }
+            .footer { font-size: 12px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 18px; margin-top: 24px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>Reset Your Password</h2>
+            <p>Hello ' . htmlspecialchars($userName) . ',</p>
+            <p>We received a request to reset the password for your Payment Portal account. You can reset your password by clicking the button below or entering the verification code:</p>
+            <div class="btn-wrap">
+                <a href="' . htmlspecialchars($resetUrl) . '" class="btn" target="_blank">Reset My Password</a>
+            </div>
+            <p style="text-align:center; font-size:13px; color:#64748b;">Or use this verification code:</p>
+            <div class="otp-box">' . htmlspecialchars($otp) . '</div>
+            <p style="font-size:13px; color:#64748b;">This reset link and code will expire in 30 minutes. If you did not request this, you can safely ignore this email.</p>
+            <div class="footer">
+                Payment Portal Security Team
+            </div>
+        </div>
+    </body>
+    </html>';
+
+    // SMTP Configuration with fallback
+    $smtpHost = getenv('PP_SMTP_HOST') ?: 'smtp.gmail.com';
+    $smtpPort = (int)(getenv('PP_SMTP_PORT') ?: 587);
+    $smtpUser = getenv('PP_SMTP_USER') ?: 'carrentpedatabase@gmail.com';
+    $smtpPass = getenv('PP_SMTP_PASS') ?: 'ydgallypuahfjnrc';
+    $fromEmail = getenv('PP_SMTP_FROM') ?: 'carrentpedatabase@gmail.com';
+    $fromName = 'Payment Portal Security';
+
+    // Dispatch mail via SMTP with TLS
+    $sent = false;
+    $mailError = '';
+
+    if (!empty($smtpHost) && !empty($smtpUser) && !empty($smtpPass)) {
+        try {
+            $socket = @fsockopen(($smtpPort === 465 ? "ssl://$smtpHost" : $smtpHost), $smtpPort, $errno, $errstr, 12);
+            if ($socket) {
+                $read = function($s) {
+                    $res = "";
+                    while ($str = fgets($s, 515)) {
+                        $res .= $str;
+                        if (substr($str, 3, 1) === ' ') break;
+                    }
+                    return $res;
+                };
+                $cmd = function($s, $c) use ($read) {
+                    fwrite($s, $c . "\r\n");
+                    return $read($s);
+                };
+
+                $read($socket);
+                $cmd($socket, "EHLO " . ($_SERVER['SERVER_NAME'] ?? 'paymentportal'));
+
+                if ($smtpPort === 587) {
+                    $cmd($socket, "STARTTLS");
+                    stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+                    $cmd($socket, "EHLO " . ($_SERVER['SERVER_NAME'] ?? 'paymentportal'));
+                }
+
+                $cmd($socket, "AUTH LOGIN");
+                $cmd($socket, base64_encode($smtpUser));
+                $cmd($socket, base64_encode($smtpPass));
+
+                $cmd($socket, "MAIL FROM: <$fromEmail>");
+                $cmd($socket, "RCPT TO: <$destEmail>");
+                $cmd($socket, "DATA");
+
+                $headers = [
+                    "From: $fromName <$fromEmail>",
+                    "To: <$destEmail>",
+                    "Subject: $subject",
+                    "MIME-Version: 1.0",
+                    "Content-Type: text/html; charset=UTF-8",
+                    "X-Mailer: PaymentPortal-PHP-SMTP/1.0"
+                ];
+
+                $bodyPayload = implode("\r\n", $headers) . "\r\n\r\n" . $htmlBody . "\r\n.\r\n";
+                fwrite($socket, $bodyPayload);
+                $read($socket);
+
+                $cmd($socket, "QUIT");
+                fclose($socket);
+                $sent = true;
+            }
+        } catch (Throwable $e) {
+            $mailError = $e->getMessage();
+            error_log("SMTP Error: " . $mailError);
+        }
+    }
+
+    // Fallback to PHP native mail() if SMTP was not able to connect
+    if (!$sent) {
+        $sent = @mail($destEmail, $subject, $htmlBody, implode("\r\n", $mailHeaders));
+    }
+
+    out([
+        'message' => 'A password reset link and verification code have been sent to your email address.',
+        'email_sent' => $sent,
+        'debug_token' => is_local_env() ? $token : null,
+        'debug_otp' => is_local_env() ? $otp : null
+    ]);
+}
+
+// 3. RESET PASSWORD (VERIFY TOKEN & UPDATE PASSWORD)
+if ($action === 'reset_password') {
+    $token = clean_str($data['token'] ?? '', 80);
+    $otp = clean_str($data['otp'] ?? '', 10);
+    $newPass = (string)($data['password'] ?? '');
+
+    if (empty($token) && empty($otp)) {
+        err('Reset token or verification code is required.');
+    }
+    if (strlen($newPass) < 6) {
+        err('New password must be at least 6 characters long.');
+    }
+
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS pp_password_resets (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            email VARCHAR(150) NOT NULL,
+            token VARCHAR(80) NOT NULL UNIQUE,
+            otp_code VARCHAR(10) NOT NULL,
+            expires_at INT NOT NULL,
+            used INT NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_token (token),
+            INDEX idx_user (user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        $now = time();
+        $row = null;
+        if (!empty($token)) {
+            $st = $pdo->prepare("SELECT * FROM pp_password_resets WHERE token = ? AND used = 0 AND expires_at > ? LIMIT 1");
+            $st->execute([$token, $now]);
+            $row = $st->fetch();
+        } elseif (!empty($otp)) {
+            $st = $pdo->prepare("SELECT * FROM pp_password_resets WHERE otp_code = ? AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1");
+            $st->execute([$otp, $now]);
+            $row = $st->fetch();
+        }
+
+        if (!$row) {
+            err('The password reset link or verification code is invalid or has expired. Please request a new one.');
+        }
+
+        $userId = (int)$row['user_id'];
+        $passHash = password_hash($newPass, PASSWORD_DEFAULT);
+
+        // Update user password in pp_users
+        $updated = false;
+        try {
+            $uSt = $pdo->prepare("UPDATE pp_users SET password_hash = ?, password = ? WHERE id = ?");
+            $uSt->execute([$passHash, $passHash, $userId]);
+            $updated = true;
+        } catch (Throwable $e1) {
+            try {
+                $uSt = $pdo->prepare("UPDATE pp_users SET password = ? WHERE id = ?");
+                $uSt->execute([$passHash, $userId]);
+                $updated = true;
+            } catch (Throwable $e2) {}
+        }
+
+        if (!$updated) {
+            err('Failed to update password. Please contact your system administrator.');
+        }
+
+        // Mark reset token as used
+        $pdo->prepare("UPDATE pp_password_resets SET used = 1 WHERE id = ?")->execute([$row['id']]);
+
+        // Clear any login throttle locks for this account so they can sign in immediately
+        clear_login_rate_limit($pdo, $row['email']);
+
+        out(['message' => 'Password has been updated successfully. You can now log in with your new password.']);
+    } catch (Throwable $e) {
+        error_log('Reset password error: ' . $e->getMessage());
+        err('An unexpected error occurred while resetting your password. Please try again.');
+    }
+}
+
+// 4. LOGOUT (AUTHENTICATED)
 if ($action === 'logout') {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
@@ -1019,6 +1297,31 @@ if ($action === 'create_payment') {
     $ecode = clean_str($data['ecode'] ?? '', 50);
     $tl = to_title_case(clean_str($data['tl'] ?? '', 150));
     $ops = to_title_case(clean_str($data['ops_manager'] ?? '', 150));
+
+    // Dynamic agent directory synchronization
+    try {
+        if ($ecode !== '') {
+            $agSt = $pdo->prepare("SELECT ecode, emp_id, agent_name, name, ops_manager, tl, team_leader FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $agSt->execute([$ecode, $ecode]);
+            $foundAg = $agSt->fetch();
+            if ($foundAg) {
+                if (!$agent || strtolower($agent) === 'unassigned agent') $agent = to_title_case(trim($foundAg['agent_name'] ?? $foundAg['name'] ?? ''));
+                if (!$ecode) $ecode = trim($foundAg['ecode'] ?? $foundAg['emp_id'] ?? '');
+                if (!$ops) $ops = to_title_case(trim($foundAg['ops_manager'] ?? ''));
+                if (!$tl) $tl = to_title_case(trim($foundAg['tl'] ?? $foundAg['team_leader'] ?? ''));
+            }
+        } elseif ($agent !== '' && strtolower($agent) !== 'unassigned agent') {
+            $agSt = $pdo->prepare("SELECT ecode, emp_id, agent_name, name, ops_manager, tl, team_leader FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?) LIMIT 1");
+            $agSt->execute([$agent, $agent]);
+            $foundAg = $agSt->fetch();
+            if ($foundAg) {
+                if (!$ecode) $ecode = trim($foundAg['ecode'] ?? $foundAg['emp_id'] ?? '');
+                if (!$ops) $ops = to_title_case(trim($foundAg['ops_manager'] ?? ''));
+                if (!$tl) $tl = to_title_case(trim($foundAg['tl'] ?? $foundAg['team_leader'] ?? ''));
+            }
+        }
+    } catch (Throwable $e) {}
+
     $cName = to_title_case(clean_str($data['client_name'] ?? '', 150));
     $cNum = clean_phone($data['client_number'] ?? '');
     $email = strtolower(trim(clean_str($data['email_id'] ?? '', 150)));
@@ -1080,45 +1383,53 @@ if ($action === 'create_payment') {
 
 // BULK IMPORT (TRANSACTIONAL, FAST, ZERO-CONNECTION EXHAUSTION)
 if ($action === 'bulk_import') {
+    @ini_set('memory_limit', '512M');
+    @set_time_limit(300);
+
     $curUser = require_role(['ADMIN', 'OPS_MANAGER']);
     $creator = $curUser['name'] ?? 'Staff';
 
-    $opsList = is_array($data['ops'] ?? null) ? $data['ops'] : [];
-    $tlsList = is_array($data['tls'] ?? null) ? $data['tls'] : [];
-    $agentsList = is_array($data['agents'] ?? null) ? $data['agents'] : [];
-    $clientsList = is_array($data['clients'] ?? null) ? $data['clients'] : [];
-    $paymentsList = is_array($data['payments'] ?? null) ? $data['payments'] : [];
+    try {
+        $opsList = is_array($data['ops'] ?? null) ? $data['ops'] : [];
+        $tlsList = is_array($data['tls'] ?? null) ? $data['tls'] : [];
+        $agentsList = is_array($data['agents'] ?? null) ? $data['agents'] : [];
+        $clientsList = is_array($data['clients'] ?? null) ? $data['clients'] : [];
+        $paymentsList = is_array($data['payments'] ?? null) ? $data['payments'] : [];
 
-    $saved = ['ops' => 0, 'tls' => 0, 'agents' => 0, 'clients' => 0, 'payments' => 0];
-    $errors = [];
+        $saved = ['ops' => 0, 'tls' => 0, 'agents' => 0, 'clients' => 0, 'payments' => 0];
+        $errors = [];
 
-    // 1. Ops Managers
-    foreach ($opsList as $o) {
-        $name = clean_str($o['name'] ?? '', 150);
-        if (!$name) continue;
-        $ecode = clean_str($o['ecode'] ?? '', 50);
-        $rep = clean_str($o['reporting_to'] ?? $o['parent'] ?? '', 150);
-        $target = max(0, floatval($o['target'] ?? 0));
+        // 1. Ops Managers
+        foreach ($opsList as $o) {
+            $name = clean_str($o['name'] ?? '', 150);
+            if (!$name) continue;
+            $ecode = clean_str($o['ecode'] ?? '', 50);
+            $rep = clean_str($o['reporting_to'] ?? $o['parent'] ?? '', 150);
+            $target = max(0, floatval($o['target'] ?? 0));
 
-        $foundId = null;
-        if ($ecode) {
-            $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-            $st->execute([$ecode, $ecode]);
-            $foundId = $st->fetchColumn();
+            try {
+                $foundId = null;
+                if ($ecode) {
+                    $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
+                    $st->execute([$ecode, $ecode]);
+                    $foundId = $st->fetchColumn();
+                }
+            if (!$foundId) {
+                $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?)");
+                $st->execute([$name]);
+                $foundId = $st->fetchColumn();
+            }
+            if ($foundId) {
+                $pdo->prepare("UPDATE pp_ops_managers SET name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), reporting_to = COALESCE(NULLIF(?, ''), reporting_to), target = CASE WHEN ? > 0 THEN ? ELSE target END WHERE id = ?")
+                    ->execute([$name, $ecode, $ecode, $rep, $target, $target, $foundId]);
+            } else {
+                $pdo->prepare("INSERT INTO pp_ops_managers (name, ecode, emp_id, reporting_to, target) VALUES (?, ?, ?, ?, ?)")
+                    ->execute([$name, $ecode ?: null, $ecode ?: null, $rep ?: null, $target]);
+            }
+            $saved['ops']++;
+        } catch (Throwable $e) {
+            $errors[] = "Ops Manager $name: " . $e->getMessage();
         }
-        if (!$foundId) {
-            $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?)");
-            $st->execute([$name]);
-            $foundId = $st->fetchColumn();
-        }
-        if ($foundId) {
-            $pdo->prepare("UPDATE pp_ops_managers SET name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), reporting_to = COALESCE(NULLIF(?, ''), reporting_to), target = CASE WHEN ? > 0 THEN ? ELSE target END WHERE id = ?")
-                ->execute([$name, $ecode, $ecode, $rep, $target, $target, $foundId]);
-        } else {
-            $pdo->prepare("INSERT INTO pp_ops_managers (name, ecode, emp_id, reporting_to, target) VALUES (?, ?, ?, ?, ?)")
-                ->execute([$name, $ecode ?: null, $ecode ?: null, $rep ?: null, $target]);
-        }
-        $saved['ops']++;
     }
 
     // 2. Team Leaders
@@ -1129,25 +1440,29 @@ if ($action === 'bulk_import') {
         $ops = clean_str($t['ops_manager'] ?? $t['parent'] ?? '', 150);
         $target = max(0, floatval($t['target'] ?? 0));
 
-        $foundId = null;
-        if ($ecode) {
-            $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-            $st->execute([$ecode, $ecode]);
-            $foundId = $st->fetchColumn();
+        try {
+            $foundId = null;
+            if ($ecode) {
+                $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
+                $st->execute([$ecode, $ecode]);
+                $foundId = $st->fetchColumn();
+            }
+            if (!$foundId) {
+                $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?)");
+                $st->execute([$name]);
+                $foundId = $st->fetchColumn();
+            }
+            if ($foundId) {
+                $pdo->prepare("UPDATE pp_team_leaders SET name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), ops_manager = COALESCE(NULLIF(?, ''), ops_manager), target = CASE WHEN ? > 0 THEN ? ELSE target END WHERE id = ?")
+                    ->execute([$name, $ecode, $ecode, $ops, $target, $target, $foundId]);
+            } else {
+                $pdo->prepare("INSERT INTO pp_team_leaders (name, ecode, emp_id, ops_manager, target) VALUES (?, ?, ?, ?, ?)")
+                    ->execute([$name, $ecode ?: null, $ecode ?: null, $ops ?: null, $target]);
+            }
+            $saved['tls']++;
+        } catch (Throwable $e) {
+            $errors[] = "Team Leader $name: " . $e->getMessage();
         }
-        if (!$foundId) {
-            $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?)");
-            $st->execute([$name]);
-            $foundId = $st->fetchColumn();
-        }
-        if ($foundId) {
-            $pdo->prepare("UPDATE pp_team_leaders SET name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), ops_manager = COALESCE(NULLIF(?, ''), ops_manager), target = CASE WHEN ? > 0 THEN ? ELSE target END WHERE id = ?")
-                ->execute([$name, $ecode, $ecode, $ops, $target, $target, $foundId]);
-        } else {
-            $pdo->prepare("INSERT INTO pp_team_leaders (name, ecode, emp_id, ops_manager, target) VALUES (?, ?, ?, ?, ?)")
-                ->execute([$name, $ecode ?: null, $ecode ?: null, $ops ?: null, $target]);
-        }
-        $saved['tls']++;
     }
 
     // 3. Agents
@@ -1159,25 +1474,29 @@ if ($action === 'bulk_import') {
         $ops = clean_str($a['ops_manager'] ?? '', 150);
         $tl = clean_str($a['tl'] ?? $a['team_leader'] ?? '', 150);
 
-        $foundId = null;
-        if ($ecode) {
-            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-            $st->execute([$ecode, $ecode]);
-            $foundId = $st->fetchColumn();
+        try {
+            $foundId = null;
+            if ($ecode) {
+                $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
+                $st->execute([$ecode, $ecode]);
+                $foundId = $st->fetchColumn();
+            }
+            if (!$foundId && $name) {
+                $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?)");
+                $st->execute([$name, $name]);
+                $foundId = $st->fetchColumn();
+            }
+            if ($foundId) {
+                $pdo->prepare("UPDATE pp_agents SET agent_name = ?, name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), ops_manager = COALESCE(NULLIF(?, ''), ops_manager), tl = COALESCE(NULLIF(?, ''), tl) WHERE id = ?")
+                    ->execute([$name, $name, $ecode, $ecode, $ops, $tl, $foundId]);
+            } else {
+                $pdo->prepare("INSERT INTO pp_agents (agent_name, name, ecode, emp_id, ops_manager, tl) VALUES (?, ?, ?, ?, ?, ?)")
+                    ->execute([$name, $name, $ecode ?: null, $ecode ?: null, $ops ?: null, $tl ?: null]);
+            }
+            $saved['agents']++;
+        } catch (Throwable $e) {
+            $errors[] = "Agent $name: " . $e->getMessage();
         }
-        if (!$foundId && $name) {
-            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?)");
-            $st->execute([$name, $name]);
-            $foundId = $st->fetchColumn();
-        }
-        if ($foundId) {
-            $pdo->prepare("UPDATE pp_agents SET agent_name = ?, name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), ops_manager = COALESCE(NULLIF(?, ''), ops_manager), tl = COALESCE(NULLIF(?, ''), tl) WHERE id = ?")
-                ->execute([$name, $name, $ecode, $ecode, $ops, $tl, $foundId]);
-        } else {
-            $pdo->prepare("INSERT INTO pp_agents (agent_name, name, ecode, emp_id, ops_manager, tl) VALUES (?, ?, ?, ?, ?, ?)")
-                ->execute([$name, $name, $ecode ?: null, $ecode ?: null, $ops ?: null, $tl ?: null]);
-        }
-        $saved['agents']++;
     }
 
     // 4. Clients KYC
@@ -1190,44 +1509,83 @@ if ($action === 'bulk_import') {
         $aadhar = clean_aadhar($c['aadhar_no'] ?? $c['aadhar'] ?? '');
         $state = clean_str($c['state'] ?? '', 100);
 
-        $foundId = null;
-        if ($cNum) {
-            $st = $pdo->prepare("SELECT id FROM pp_clients WHERE client_number = ? LIMIT 1");
-            $st->execute([$cNum]);
-            $foundId = $st->fetchColumn();
+        try {
+            $foundId = null;
+            if ($cNum) {
+                $st = $pdo->prepare("SELECT id FROM pp_clients WHERE client_number = ? LIMIT 1");
+                $st->execute([$cNum]);
+                $foundId = $st->fetchColumn();
+            }
+            if (!$foundId && $cName) {
+                $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(TRIM(client_name)) = LOWER(?) LIMIT 1");
+                $st->execute([$cName]);
+                $foundId = $st->fetchColumn();
+            }
+            if ($foundId) {
+                $pdo->prepare("UPDATE pp_clients SET 
+                    client_name = COALESCE(NULLIF(?, ''), client_name),
+                    client_number = COALESCE(NULLIF(?, ''), client_number),
+                    email_id = COALESCE(NULLIF(?, ''), email_id),
+                    pan_no = COALESCE(NULLIF(?, ''), pan_no),
+                    aadhar_no = COALESCE(NULLIF(?, ''), aadhar_no),
+                    state = COALESCE(NULLIF(?, ''), state)
+                    WHERE id = ?")
+                    ->execute([$cName, $cNum, $email, $pan, $aadhar, $state, $foundId]);
+            } else {
+                $pdo->prepare("INSERT INTO pp_clients (client_name, client_number, email_id, pan_no, aadhar_no, state) VALUES (?, ?, ?, ?, ?, ?)")
+                    ->execute([$cName ?: 'Unknown', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null]);
+            }
+            $saved['clients']++;
+        } catch (Throwable $e) {
+            $errors[] = "Client " . ($cName ?: $cNum) . ": " . $e->getMessage();
         }
-        if (!$foundId && $cName) {
-            $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(TRIM(client_name)) = LOWER(?) LIMIT 1");
-            $st->execute([$cName]);
-            $foundId = $st->fetchColumn();
-        }
-        if ($foundId) {
-            $pdo->prepare("UPDATE pp_clients SET 
-                client_name = COALESCE(NULLIF(?, ''), client_name),
-                client_number = COALESCE(NULLIF(?, ''), client_number),
-                email_id = COALESCE(NULLIF(?, ''), email_id),
-                pan_no = COALESCE(NULLIF(?, ''), pan_no),
-                aadhar_no = COALESCE(NULLIF(?, ''), aadhar_no),
-                state = COALESCE(NULLIF(?, ''), state)
-                WHERE id = ?")
-                ->execute([$cName, $cNum, $email, $pan, $aadhar, $state, $foundId]);
-        } else {
-            $pdo->prepare("INSERT INTO pp_clients (client_name, client_number, email_id, pan_no, aadhar_no, state) VALUES (?, ?, ?, ?, ?, ?)")
-                ->execute([$cName ?: 'Unknown', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null]);
-        }
-        $saved['clients']++;
     }
 
     // 5. Payments
+    // Build quick in-memory agent lookup maps from freshly synced pp_agents table
+    $liveAgentsByCode = [];
+    $liveAgentsByName = [];
+    try {
+        $agRows = $pdo->query("SELECT ecode, emp_id, agent_name, name, ops_manager, tl, team_leader FROM pp_agents")->fetchAll();
+        foreach ($agRows as $ar) {
+            $c = strtolower(trim($ar['ecode'] ?? $ar['emp_id'] ?? ''));
+            $n = strtolower(trim($ar['agent_name'] ?? $ar['name'] ?? ''));
+            $item = [
+                'ecode' => trim($ar['ecode'] ?? $ar['emp_id'] ?? ''),
+                'name' => trim($ar['agent_name'] ?? $ar['name'] ?? ''),
+                'ops' => trim($ar['ops_manager'] ?? ''),
+                'tl' => trim($ar['tl'] ?? $ar['team_leader'] ?? '')
+            ];
+            if ($c !== '') $liveAgentsByCode[$c] = $item;
+            if ($n !== '') $liveAgentsByName[$n] = $item;
+        }
+    } catch (Throwable $e) {}
+
     foreach ($paymentsList as $p) {
         $pDate = clean_str($p['payment_date'] ?? date('Y-m-d'), 20);
         $agent = clean_str($p['agent_name'] ?? '', 150);
-        if (!$agent) $agent = 'Unassigned Agent';
+        $ecode = clean_str($p['ecode'] ?? $p['emp_id'] ?? '', 50);
+
+        // Dynamically link agent directory if ecode or agent name is available
+        $matched = null;
+        if ($ecode !== '' && isset($liveAgentsByCode[strtolower($ecode)])) {
+            $matched = $liveAgentsByCode[strtolower($ecode)];
+        } elseif ($agent !== '' && strtolower($agent) !== 'unassigned agent' && isset($liveAgentsByName[strtolower($agent)])) {
+            $matched = $liveAgentsByName[strtolower($agent)];
+        }
+
+        if ($matched) {
+            if ($matched['name'] && (!$agent || strtolower($agent) === 'unassigned agent')) $agent = $matched['name'];
+            if ($matched['ecode'] && !$ecode) $ecode = $matched['ecode'];
+            if ($matched['ops'] && empty($p['ops_manager'])) $p['ops_manager'] = $matched['ops'];
+            if ($matched['tl'] && empty($p['tl'])) $p['tl'] = $matched['tl'];
+        }
+
+        if (!$agent) $agent = $ecode ?: 'Unassigned Agent';
         $usdt = round((float)($p['usdt'] ?? 0), 2);
         $inr = round((float)($p['inr_amount'] ?? 0), 2);
         if ($usdt <= 0 && $inr <= 0) continue;
 
-        $ecode = clean_str($p['ecode'] ?? '', 50);
         $tl = clean_str($p['tl'] ?? '', 150);
         $ops = clean_str($p['ops_manager'] ?? '', 150);
         $cName = clean_str($p['client_name'] ?? '', 150);
@@ -1284,7 +1642,11 @@ if ($action === 'bulk_import') {
         }
     }
 
-    out(['success' => true, 'saved' => $saved, 'errors' => $errors]);
+        out(['success' => true, 'saved' => $saved, 'errors' => $errors]);
+    } catch (Throwable $mainErr) {
+        error_log("bulk_import fatal error: " . $mainErr->getMessage());
+        out(['success' => false, 'error' => $mainErr->getMessage(), 'saved' => $saved ?? []]);
+    }
 }
 
 if ($action === 'delete_payment') {
@@ -1495,20 +1857,28 @@ if ($action === 'upsert_ops_node') {
             if (!$rep && !empty($old['reporting_to'])) $rep = $old['reporting_to'];
             if ($target <= 0 && !empty($old['target'])) $target = floatval($old['target']);
         }
+        $ecodeVal = $ecode ?: null;
+        $repVal = $rep ?: null;
         $stmt = $pdo->prepare("UPDATE pp_ops_managers SET ecode=?, emp_id=?, name=?, reporting_to=?, reporting_level_1=?, target=?, monthly_target=? WHERE id=?");
-        $stmt->execute([$ecode, $ecode, $name, $rep, $rep, $target, $target, $foundId]);
+        $stmt->execute([$ecodeVal, $ecodeVal, $name, $repVal, $repVal, $target, $target, $foundId]);
         if ($ecode) {
-            $pdo->prepare("DELETE FROM pp_ops_managers WHERE id != ? AND (LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?))")->execute([$foundId, $ecode, $ecode, $name]);
+            try {
+                $pdo->prepare("DELETE FROM pp_ops_managers WHERE id != ? AND (LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?))")->execute([$foundId, $ecode, $ecode]);
+            } catch (Throwable $e) {}
         }
     } else {
+        $ecodeVal = $ecode ?: null;
+        $repVal = $rep ?: null;
         $stmt = $pdo->prepare("INSERT INTO pp_ops_managers (ecode, emp_id, name, reporting_to, reporting_level_1, target, monthly_target) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$ecode, $ecode, $name, $rep, $rep, $target, $target]);
+        $stmt->execute([$ecodeVal, $ecodeVal, $name, $repVal, $repVal, $target, $target]);
     }
 
     if ($prevName && strcasecmp($prevName, $name) !== 0) {
-        $pdo->prepare("UPDATE pp_team_leaders SET reporting_level_1 = ?, ops_manager = ?, reporting_to = ? WHERE LOWER(TRIM(reporting_level_1)) = LOWER(?) OR LOWER(TRIM(ops_manager)) = LOWER(?) OR LOWER(TRIM(reporting_to)) = LOWER(?)")->execute([$name, $name, $name, $prevName, $prevName, $prevName]);
-        $pdo->prepare("UPDATE pp_agents SET ops_manager = ? WHERE LOWER(TRIM(ops_manager)) = LOWER(?)")->execute([$name, $prevName]);
-        $pdo->prepare("UPDATE pp_payments SET ops_manager = ? WHERE LOWER(TRIM(ops_manager)) = LOWER(?)")->execute([$name, $prevName]);
+        try {
+            $pdo->prepare("UPDATE pp_team_leaders SET reporting_level_1 = ?, ops_manager = ?, reporting_to = ? WHERE LOWER(TRIM(reporting_level_1)) = LOWER(?) OR LOWER(TRIM(ops_manager)) = LOWER(?) OR LOWER(TRIM(reporting_to)) = LOWER(?)")->execute([$name, $name, $name, $prevName, $prevName, $prevName]);
+            $pdo->prepare("UPDATE pp_agents SET ops_manager = ? WHERE LOWER(TRIM(ops_manager)) = LOWER(?)")->execute([$name, $prevName]);
+            $pdo->prepare("UPDATE pp_payments SET ops_manager = ? WHERE LOWER(TRIM(ops_manager)) = LOWER(?)")->execute([$name, $prevName]);
+        } catch (Throwable $e) {}
     }
     out(['success' => true]);
 }
@@ -1584,19 +1954,27 @@ if ($action === 'upsert_tl_node') {
             if (!$ops && !empty($old['ops_manager'])) $ops = $old['ops_manager'];
             if ($target <= 0 && !empty($old['target'])) $target = floatval($old['target']);
         }
+        $ecodeVal = $ecode ?: null;
+        $opsVal = $ops ?: null;
         $stmt = $pdo->prepare("UPDATE pp_team_leaders SET ecode=?, emp_id=?, name=?, ops_manager=?, reporting_level_1=?, reporting_to=?, target=?, monthly_target=? WHERE id=?");
-        $stmt->execute([$ecode, $ecode, $name, $ops, $ops, $ops, $target, $target, $foundId]);
+        $stmt->execute([$ecodeVal, $ecodeVal, $name, $opsVal, $opsVal, $opsVal, $target, $target, $foundId]);
         if ($ecode) {
-            $pdo->prepare("DELETE FROM pp_team_leaders WHERE id != ? AND (LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?))")->execute([$foundId, $ecode, $ecode, $name]);
+            try {
+                $pdo->prepare("DELETE FROM pp_team_leaders WHERE id != ? AND (LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?))")->execute([$foundId, $ecode, $ecode]);
+            } catch (Throwable $e) {}
         }
     } else {
+        $ecodeVal = $ecode ?: null;
+        $opsVal = $ops ?: null;
         $stmt = $pdo->prepare("INSERT INTO pp_team_leaders (ecode, emp_id, name, ops_manager, reporting_level_1, reporting_to, target, monthly_target) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$ecode, $ecode, $name, $ops, $ops, $ops, $target, $target]);
+        $stmt->execute([$ecodeVal, $ecodeVal, $name, $opsVal, $opsVal, $opsVal, $target, $target]);
     }
 
     if ($prevName && strcasecmp($prevName, $name) !== 0) {
-        $pdo->prepare("UPDATE pp_agents SET tl = ?, team_leader = ? WHERE LOWER(TRIM(tl)) = LOWER(?) OR LOWER(TRIM(team_leader)) = LOWER(?)")->execute([$name, $name, $prevName, $prevName]);
-        $pdo->prepare("UPDATE pp_payments SET tl = ?, tl_name = ? WHERE LOWER(TRIM(tl)) = LOWER(?) OR LOWER(TRIM(tl_name)) = LOWER(?)")->execute([$name, $name, $prevName, $prevName]);
+        try {
+            $pdo->prepare("UPDATE pp_agents SET tl = ?, team_leader = ? WHERE LOWER(TRIM(tl)) = LOWER(?) OR LOWER(TRIM(team_leader)) = LOWER(?)")->execute([$name, $name, $prevName, $prevName]);
+            $pdo->prepare("UPDATE pp_payments SET tl = ?, tl_name = ? WHERE LOWER(TRIM(tl)) = LOWER(?) OR LOWER(TRIM(tl_name)) = LOWER(?)")->execute([$name, $name, $prevName, $prevName]);
+        } catch (Throwable $e) {}
     }
     out(['success' => true]);
 }
@@ -1649,12 +2027,15 @@ if ($action === 'upsert_agent_node') {
         $foundId = $st->fetchColumn();
     }
 
+    $ecodeVal = $ecode ?: null;
+    $opsVal = $ops ?: null;
+    $tlVal = $tl ?: null;
     if ($foundId) {
         $stmt = $pdo->prepare("UPDATE pp_agents SET ecode=?, emp_id=?, agent_name=?, name=?, ops_manager=?, tl=?, team_leader=? WHERE id=?");
-        $stmt->execute([$ecode, $ecode, $name, $name, $ops, $tl, $tl, $foundId]);
+        $stmt->execute([$ecodeVal, $ecodeVal, $name, $name, $opsVal, $tlVal, $tlVal, $foundId]);
     } else {
         $stmt = $pdo->prepare("INSERT INTO pp_agents (ecode, emp_id, agent_name, name, ops_manager, tl, team_leader) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$ecode, $ecode, $name, $name, $ops, $tl, $tl]);
+        $stmt->execute([$ecodeVal, $ecodeVal, $name, $name, $opsVal, $tlVal, $tlVal]);
     }
 
     if ($prevName && strcasecmp($prevName, $name) !== 0) {
@@ -1697,12 +2078,17 @@ if ($action === 'upsert_client_node') {
 
     $kycErr = validate_kyc_rules($cNum, $pan, $aadhar, $email, false);
     if ($kycErr) {
-        err($kycErr);
+        // If coming from import or auto-sync, sanitize invalid fields to null instead of aborting
+        if ($pan !== '' && !is_masked($pan) && !preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/', $pan)) $pan = '';
+        if ($aadhar !== '' && !is_masked($aadhar) && strlen(preg_replace('/\D/', '', $aadhar)) !== 12) $aadhar = '';
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $email = '';
+        if ($cNum !== '' && !preg_match('/^[6-9]\d{9}$/', $cNum)) $cNum = '';
+        if (!$cName && !$cNum) err($kycErr);
     }
 
     if ($id > 0) {
         $stmt = $pdo->prepare("UPDATE pp_clients SET client_name=?, client_number=?, email_id=?, pan_no=?, aadhar_no=?, state=? WHERE id=?");
-        $stmt->execute([$cName ?: 'Unknown Client', $cNum, $email, $pan, $aadhar, $state, $id]);
+        $stmt->execute([$cName ?: 'Unknown Client', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null, $id]);
         out(['success' => true]);
     }
 
@@ -1713,17 +2099,17 @@ if ($action === 'upsert_client_node') {
         $check = $st->fetchColumn();
     }
     if (!$check && $cName) {
-        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(client_name) = LOWER(?) LIMIT 1");
+        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(TRIM(client_name)) = LOWER(?) LIMIT 1");
         $st->execute([$cName]);
         $check = $st->fetchColumn();
     }
 
     if ($check) {
         $stmt = $pdo->prepare("UPDATE pp_clients SET client_name=?, client_number=?, email_id=?, pan_no=?, aadhar_no=?, state=? WHERE id=?");
-        $stmt->execute([$cName ?: 'Unknown Client', $cNum, $email, $pan, $aadhar, $state, $check]);
+        $stmt->execute([$cName ?: 'Unknown Client', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null, $check]);
     } else {
         $stmt = $pdo->prepare("INSERT INTO pp_clients (client_name, client_number, email_id, pan_no, aadhar_no, state) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$cName ?: 'Unknown Client', $cNum, $email, $pan, $aadhar, $state]);
+        $stmt->execute([$cName ?: 'Unknown Client', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null]);
     }
     out(['success' => true]);
 }
@@ -1979,7 +2365,9 @@ if ($action === 'wipe_database_records') {
 err('Unknown action: ' . htmlspecialchars($action), 404);
 
 } catch (Throwable $e) {
-    error_log("API Unhandled Error in action '{$action}': " . $e->getMessage());
-    err('An unexpected server error occurred. Please try again.', 500);
+    error_log("API Unhandled Error in action '{$action}': " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+    $msg = $e->getMessage();
+    // Provide explicit error description for debugging
+    err("Server Error [{$action}]: " . $msg, 500);
 }
 ?>

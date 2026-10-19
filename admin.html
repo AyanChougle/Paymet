@@ -6,7 +6,7 @@
     <title>Admin Portal | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=13">
+    <link rel="stylesheet" href="assets/css/app.css?v=18">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -57,7 +57,7 @@
                 </div>
             </div>
             <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
-                <input type="file" id="importFile" accept=".xlsx, .xls, .csv, .txt" style="flex: 1; min-width: 200px; padding: 8px; background: var(--bg-lighter); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                <input type="file" id="importFile" accept=".xlsx, .xls, .csv, .txt" style="max-width: 380px; padding: 8px 12px; background: var(--bg-lighter); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
                 <button id="importBtn" class="primary" style="white-space: nowrap;">Import Master File</button>
                 <button id="clearAllBtn" class="danger" style="white-space: nowrap;">Wipe All Records</button>
             </div>
@@ -103,7 +103,7 @@
             </form>
 
             <div class="table-wrap" style="margin-top:14px;">
-                <table>
+                <table class="table-targets">
                     <thead>
                         <tr>
                             <th>Role / Type</th>
@@ -146,7 +146,7 @@
                 <h2>Registered Users</h2>
             </div>
             <div class="table-wrap">
-                <table>
+                <table class="table-users">
                     <thead>
                         <tr>
                             <th>User Name</th>
@@ -162,8 +162,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=16"></script>
-    <script src="assets/js/auth.js?v=16"></script>
-    <script src="assets/js/admin.js?v=16"></script>
+    <script src="assets/js/api.js?v=20"></script>
+    <script src="assets/js/auth.js?v=20"></script>
+    <script src="assets/js/admin.js?v=20"></script>
 </body>
 </html>

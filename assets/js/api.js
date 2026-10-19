@@ -75,6 +75,16 @@ function handleLocalDevApi(action, data) {
         return { success: true, user: user, local_mode: true };
     }
 
+    // 1b. Forgot Password (Mock Local Dev)
+    if (action === 'forgot_password') {
+        return { success: true, message: 'Password reset link sent to your email address.', debug_otp: '123456' };
+    }
+
+    // 1c. Reset Password (Mock Local Dev)
+    if (action === 'reset_password') {
+        return { success: true, message: 'Password has been updated successfully. You can now log in.' };
+    }
+
     // 2. Current User
     if (action === 'get_current_user') {
         const u = getCurrentUser();

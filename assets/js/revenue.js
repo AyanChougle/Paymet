@@ -39,19 +39,6 @@ function getAgentTl(name) {
     return found && (found.tl || found.team_leader) ? (found.tl || found.team_leader) : '-';
 }
 
-const CANONICAL_ROLE_TARGETS = {
-    OPS: {
-        'rushikesh': 3500000,
-        'arshad': 3500000
-    },
-    TL: {
-        'mayur': 1500000,
-        'viren': 1750000,
-        'ritik': 1500000,
-        'saif': 1750000
-    }
-};
-
 function getRoleTarget(type, name) {
     if (!name) return 0;
     const clean = (name || '').trim().toLowerCase();
@@ -75,11 +62,6 @@ function getRoleTarget(type, name) {
                 if (tgt > 0) return tgt;
             }
         }
-    }
-
-    const defMap = CANONICAL_ROLE_TARGETS[type] || {};
-    for (const [k, v] of Object.entries(defMap)) {
-        if (clean.includes(k)) return v;
     }
 
     return 0;
@@ -750,7 +732,8 @@ function formatLastEntryTime(str) {
         <td colspan="3" style="text-align:left;"><strong>Grand Total</strong></td>
         <td style="text-align:right; font-weight:700;">${fmtInr(tlMtdTotal)}</td>
         <td style="text-align:right; font-weight:700;">${fmtInr(tlFtdTotal)}</td>
-        <td colspan="2">-</td>
+        <td style="text-align:right; color:var(--text-muted);">-</td>
+        <td style="text-align:left; color:var(--text-muted);">-</td>
     </tr>`;
 
     // 3. Render Ops Managers Table (Fetched dynamically from DB table pp_ops_managers)
@@ -785,7 +768,8 @@ function formatLastEntryTime(str) {
         <td colspan="3" style="text-align:left;"><strong>Grand Total</strong></td>
         <td style="text-align:right; font-weight:700;">${fmtInr(opsMtdTotal)}</td>
         <td style="text-align:right; font-weight:700;">${fmtInr(opsFtdTotal)}</td>
-        <td colspan="2">-</td>
+        <td style="text-align:right; color:var(--text-muted);">-</td>
+        <td style="text-align:left; color:var(--text-muted);">-</td>
     </tr>`;
 
     // 4. Render Payment Mode Bifurcation

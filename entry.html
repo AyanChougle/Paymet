@@ -6,7 +6,7 @@
     <title>Payment Entry | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=13">
+    <link rel="stylesheet" href="assets/css/app.css?v=18">
 </head>
 <body>
     <aside class="sidebar">
@@ -36,16 +36,16 @@
         </header>
 
         <form id="entryForm" class="panel form-grid" autocomplete="off">
-            <datalist id="agentList"></datalist>
-            <datalist id="clientListSuggestions"></datalist>
-
             <label>
                 Payment Date
                 <input name="payment_date" type="date" required>
             </label>
             <label>
                 Agent Name
-                <input name="agent_name" id="agent_name" list="agentList" placeholder="Select or type agent name..." required autocomplete="off">
+                <div class="omni-input-wrap">
+                    <input name="agent_name" id="agent_name" placeholder="Select or type agent name..." required autocomplete="off" spellcheck="false">
+                    <div id="agent_name_dropdown" class="omni-dropdown" role="listbox"></div>
+                </div>
             </label>
             <label>
                 E-Code
@@ -75,7 +75,10 @@
                 <div class="form-grid" style="margin: 0; padding: 0; border: none; background: transparent;">
                     <label>
                         Agent 2 Name
-                        <input name="agent2_name" id="agent2_name" list="agentList" placeholder="Select or type second agent..." autocomplete="off">
+                        <div class="omni-input-wrap">
+                            <input name="agent2_name" id="agent2_name" placeholder="Select or type second agent..." autocomplete="off" spellcheck="false">
+                            <div id="agent2_name_dropdown" class="omni-dropdown" role="listbox"></div>
+                        </div>
                     </label>
                     <label>
                         Agent 2 E-Code
@@ -94,7 +97,10 @@
 
             <label>
                 Client Name
-                <input name="client_name" id="client_name" list="clientListSuggestions" placeholder="Enter client name...">
+                <div class="omni-input-wrap">
+                    <input name="client_name" id="client_name" placeholder="Enter client name..." autocomplete="off" spellcheck="false">
+                    <div id="client_name_dropdown" class="omni-dropdown" role="listbox"></div>
+                </div>
             </label>
             <label>
                 Client Phone Number
@@ -139,8 +145,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=16"></script>
-    <script src="assets/js/auth.js?v=16"></script>
-    <script src="assets/js/entry.js?v=16"></script>
+    <script src="assets/js/api.js?v=18"></script>
+    <script src="assets/js/auth.js?v=18"></script>
+    <script src="assets/js/entry.js?v=18"></script>
 </body>
 </html>

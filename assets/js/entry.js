@@ -2,9 +2,6 @@ const f = document.getElementById('entryForm');
 const msg = document.getElementById('entryMsg');
 const ratioSelect = document.getElementById('ratioSelect');
 const agent2Section = document.getElementById('agent2Section');
-const agentList = document.getElementById('agentList');
-const clientListSuggestions = document.getElementById('clientListSuggestions');
-
 // Default date to today
 f.payment_date.value = new Date().toISOString().slice(0, 10);
 f.divided_by.value = '88';
@@ -20,22 +17,6 @@ function computeInr() {
 
 f.usdt.addEventListener('input', computeInr);
 
-// Handle 50/50 Ratio toggle
-function onRatioChange() {
-    if (ratioSelect.value === '50/50') {
-        agent2Section.style.display = 'block';
-        f.agent2_name.required = true;
-    } else {
-        agent2Section.style.display = 'none';
-        f.agent2_name.required = false;
-        f.agent2_name.value = '';
-        f.agent2_ecode.value = '';
-        f.agent2_ops_manager.value = '';
-        f.agent2_tl.value = '';
-    }
-}
-ratioSelect.addEventListener('change', onRatioChange);
-
 // Title case helper
 function toTitleCase(str) {
     if (!str) return '';
@@ -46,39 +27,26 @@ function toTitleCase(str) {
         .join(' ');
 }
 
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function highlightMatch(text, query) {
+    if (!text) return '';
+    if (!query) return escapeHtml(text);
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+    return escapeHtml(text).replace(regex, '<span class="omni-match">$1</span>');
+}
+
 // In-memory cache loaded from live DB
 let dbAgents = [];
 let dbClients = [];
-
-function populateSuggestions() {
-    if (!agentList) return;
-    agentList.innerHTML = '';
-    // Only suggest active agents (is_active !== 0)
-    const activeAgents = dbAgents.filter(a => a.is_active !== 0 && a.is_active !== false && a.is_active !== '0');
-    activeAgents.forEach(a => {
-        const name = toTitleCase((a.agent_name || a.name || '').trim());
-        const ecode = (a.ecode || a.emp_id || '').trim();
-        if (name) {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.label = ecode ? `${ecode} — ${name}` : name;
-            agentList.appendChild(opt);
-        }
-    });
-
-    if (clientListSuggestions && dbClients.length) {
-        clientListSuggestions.innerHTML = '';
-        dbClients.forEach(c => {
-            const cName = toTitleCase((c.client_name || '').trim());
-            if (cName) {
-                const opt = document.createElement('option');
-                opt.value = cName;
-                if (c.client_number) opt.label = `${cName} (${c.client_number})`;
-                clientListSuggestions.appendChild(opt);
-            }
-        });
-    }
-}
 
 async function initEntryData() {
     let apiSucceeded = false;
@@ -101,9 +69,347 @@ async function initEntryData() {
         localStorage.setItem('pp_mappings', JSON.stringify(dbAgents));
         localStorage.setItem('pp_clients', JSON.stringify(dbClients));
     }
-    populateSuggestions();
 }
 initEntryData();
+
+function getActiveAgents() {
+    const seen = new Set();
+    const result = [];
+    const active = dbAgents.filter(a => a.is_active !== 0 && a.is_active !== false && a.is_active !== '0');
+    for (const a of active) {
+        const name = (a.agent_name || a.name || '').trim();
+        const code = (a.ecode || a.emp_id || '').trim();
+        const key = `${name.toLowerCase()}__${code.toLowerCase()}`;
+        if (name && !seen.has(key)) {
+            seen.add(key);
+            result.push(a);
+        }
+    }
+    return result;
+}
+
+function filterAgents(query) {
+    const list = getActiveAgents();
+    if (!query) {
+        return list.slice(0, 15);
+    }
+    const clean = query.trim().toLowerCase();
+    const cleanAlpha = clean.replace(/[^a-z0-9]/g, '');
+
+    const starts = [];
+    const contains = [];
+    const otherMatch = [];
+
+    for (const a of list) {
+        const name = (a.agent_name || a.name || '').trim().toLowerCase();
+        const code = (a.ecode || a.emp_id || '').trim().toLowerCase();
+        const tl = (a.tl || a.team_leader || '').trim().toLowerCase();
+        const ops = (a.ops_manager || '').trim().toLowerCase();
+
+        if (name.startsWith(clean) || (code && code.startsWith(clean))) {
+            starts.push(a);
+        } else if (name.includes(clean) || (code && code.includes(clean))) {
+            contains.push(a);
+        } else if (tl.includes(clean) || ops.includes(clean)) {
+            otherMatch.push(a);
+        } else if (cleanAlpha.length >= 2) {
+            const nameAlpha = name.replace(/[^a-z0-9]/g, '');
+            const codeAlpha = code.replace(/[^a-z0-9]/g, '');
+            if (nameAlpha.includes(cleanAlpha) || (codeAlpha && codeAlpha.includes(cleanAlpha))) {
+                otherMatch.push(a);
+            }
+        }
+    }
+
+    return [...starts, ...contains, ...otherMatch].slice(0, 20);
+}
+
+function filterClients(query) {
+    const seen = new Set();
+    const list = [];
+    for (const c of dbClients) {
+        const name = (c.client_name || '').trim();
+        const num = (c.client_number || '').trim();
+        const key = `${name.toLowerCase()}__${num}`;
+        if (name && !seen.has(key)) {
+            seen.add(key);
+            list.push(c);
+        }
+    }
+
+    if (!query) {
+        return list.slice(0, 15);
+    }
+
+    const clean = query.trim().toLowerCase();
+    const digits = clean.replace(/\D/g, '');
+
+    return list.filter(c => {
+        const cName = (c.client_name || '').toLowerCase();
+        const cNum = (c.client_number || '');
+        if (cName.includes(clean)) return true;
+        if (digits && cNum.includes(digits)) return true;
+        return false;
+    }).slice(0, 20);
+}
+
+function setupOmniboxAutocomplete({ inputEl, dropdownEl, getSuggestions, renderItem, onSelect }) {
+    if (!inputEl || !dropdownEl) return null;
+
+    let activeIndex = -1;
+    let currentItems = [];
+    let isOpen = false;
+
+    function open() {
+        const query = (inputEl.value || '').trim();
+        currentItems = getSuggestions(query);
+        render();
+        dropdownEl.classList.add('show');
+        isOpen = true;
+    }
+
+    function close() {
+        dropdownEl.classList.remove('show');
+        dropdownEl.innerHTML = '';
+        activeIndex = -1;
+        currentItems = [];
+        isOpen = false;
+    }
+
+    function render() {
+        dropdownEl.innerHTML = '';
+        if (!currentItems || currentItems.length === 0) {
+            const query = (inputEl.value || '').trim();
+            if (query) {
+                const empty = document.createElement('div');
+                empty.className = 'omni-empty';
+                empty.textContent = `No matches for "${query}"`;
+                dropdownEl.appendChild(empty);
+            } else {
+                close();
+            }
+            return;
+        }
+
+        currentItems.forEach((item, idx) => {
+            const el = renderItem(item, (inputEl.value || '').trim(), idx === activeIndex);
+            el.setAttribute('data-index', idx);
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                selectItem(idx);
+            });
+            el.addEventListener('mouseenter', () => {
+                activeIndex = idx;
+                updateActiveVisual();
+            });
+            dropdownEl.appendChild(el);
+        });
+    }
+
+    function updateActiveVisual() {
+        const children = dropdownEl.querySelectorAll('.omni-item');
+        children.forEach((child, idx) => {
+            if (idx === activeIndex) {
+                child.classList.add('active');
+                child.scrollIntoView({ block: 'nearest' });
+            } else {
+                child.classList.remove('active');
+            }
+        });
+    }
+
+    function selectItem(idx) {
+        if (idx >= 0 && idx < currentItems.length) {
+            const item = currentItems[idx];
+            onSelect(item);
+            close();
+        }
+    }
+
+    inputEl.addEventListener('focus', () => {
+        open();
+    });
+
+    inputEl.addEventListener('input', () => {
+        activeIndex = 0;
+        open();
+    });
+
+    inputEl.addEventListener('keydown', (e) => {
+        if (!isOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            open();
+            e.preventDefault();
+            return;
+        }
+
+        if (!isOpen) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (currentItems.length > 0) {
+                activeIndex = (activeIndex + 1) % currentItems.length;
+                updateActiveVisual();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentItems.length > 0) {
+                activeIndex = (activeIndex - 1 + currentItems.length) % currentItems.length;
+                updateActiveVisual();
+            }
+        } else if (e.key === 'Enter') {
+            if (isOpen && currentItems.length > 0) {
+                e.preventDefault();
+                const targetIdx = activeIndex >= 0 ? activeIndex : 0;
+                selectItem(targetIdx);
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            close();
+        } else if (e.key === 'Tab') {
+            if (isOpen && activeIndex >= 0) {
+                selectItem(activeIndex);
+            } else {
+                close();
+            }
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) {
+            close();
+        }
+    });
+
+    return { open, close, refresh: () => { if (isOpen) open(); } };
+}
+
+function renderAgentRow(agent, query, isActive) {
+    const item = document.createElement('div');
+    item.className = `omni-item${isActive ? ' active' : ''}`;
+    
+    const name = toTitleCase((agent.agent_name || agent.name || '').trim());
+    const ecode = (agent.ecode || agent.emp_id || '').trim();
+    const tl = toTitleCase(agent.tl || agent.team_leader || '');
+    const ops = toTitleCase(agent.ops_manager || '');
+
+    const highlightedName = highlightMatch(name, query);
+    const highlightedEcode = ecode ? highlightMatch(ecode, query) : '';
+
+    item.innerHTML = `
+        <div class="omni-item-left">
+            <span class="omni-icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+            </span>
+            <div class="omni-text">
+                <div class="omni-primary">${highlightedName}</div>
+                <div class="omni-sub">
+                    ${ecode ? `<span class="omni-ecode-badge">${highlightedEcode}</span>` : ''}
+                    ${tl ? `<span class="omni-dot">•</span><span>TL: ${escapeHtml(tl)}</span>` : ''}
+                    ${ops ? `<span class="omni-dot">•</span><span>Ops: ${escapeHtml(ops)}</span>` : ''}
+                </div>
+            </div>
+        </div>
+        <div class="omni-item-right">
+            <span class="omni-action">Select ↵</span>
+        </div>
+    `;
+    return item;
+}
+
+function renderClientRow(client, query, isActive) {
+    const item = document.createElement('div');
+    item.className = `omni-item${isActive ? ' active' : ''}`;
+
+    const name = toTitleCase((client.client_name || '').trim());
+    const num = (client.client_number || '').trim();
+
+    const highlightedName = highlightMatch(name, query);
+    const highlightedNum = num ? highlightMatch(num, query) : '';
+
+    item.innerHTML = `
+        <div class="omni-item-left">
+            <span class="omni-icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                </svg>
+            </span>
+            <div class="omni-text">
+                <div class="omni-primary">${highlightedName}</div>
+                ${num ? `<div class="omni-sub"><span class="omni-phone">📞 ${highlightedNum}</span></div>` : ''}
+            </div>
+        </div>
+        <div class="omni-item-right">
+            <span class="omni-action">Select ↵</span>
+        </div>
+    `;
+    return item;
+}
+
+const agent1Omni = setupOmniboxAutocomplete({
+    inputEl: f.agent_name,
+    dropdownEl: document.getElementById('agent_name_dropdown'),
+    getSuggestions: filterAgents,
+    renderItem: renderAgentRow,
+    onSelect: (agent) => {
+        f.agent_name.value = toTitleCase(agent.agent_name || agent.name);
+        f.ecode.value = agent.ecode || agent.emp_id || '';
+        f.ops_manager.value = toTitleCase(agent.ops_manager || '');
+        f.tl.value = toTitleCase(agent.tl || agent.team_leader || '');
+        if (ratioSelect.value === '50/50') {
+            f.agent2_name.focus();
+        } else {
+            f.ratioSelect.focus();
+        }
+    }
+});
+
+const agent2Omni = setupOmniboxAutocomplete({
+    inputEl: f.agent2_name,
+    dropdownEl: document.getElementById('agent2_name_dropdown'),
+    getSuggestions: filterAgents,
+    renderItem: renderAgentRow,
+    onSelect: (agent) => {
+        f.agent2_name.value = toTitleCase(agent.agent_name || agent.name);
+        f.agent2_ecode.value = agent.ecode || agent.emp_id || '';
+        f.agent2_ops_manager.value = toTitleCase(agent.ops_manager || '');
+        f.agent2_tl.value = toTitleCase(agent.tl || agent.team_leader || '');
+        f.client_name.focus();
+    }
+});
+
+const clientOmni = setupOmniboxAutocomplete({
+    inputEl: f.client_name,
+    dropdownEl: document.getElementById('client_name_dropdown'),
+    getSuggestions: filterClients,
+    renderItem: renderClientRow,
+    onSelect: (client) => {
+        f.client_name.value = toTitleCase(client.client_name || '');
+        if (client.client_number) {
+            f.client_number.value = formatClientPhone(client.client_number);
+        }
+        f.client_number.focus();
+    }
+});
+
+// Handle 50/50 Ratio toggle
+function onRatioChange() {
+    if (ratioSelect.value === '50/50') {
+        agent2Section.style.display = 'block';
+        f.agent2_name.required = true;
+    } else {
+        agent2Section.style.display = 'none';
+        f.agent2_name.required = false;
+        f.agent2_name.value = '';
+        f.agent2_ecode.value = '';
+        f.agent2_ops_manager.value = '';
+        f.agent2_tl.value = '';
+        if (agent2Omni) agent2Omni.close();
+    }
+}
+ratioSelect.addEventListener('change', onRatioChange);
 
 // Helper to find agent record by name or ecode from registered active agents
 function findAgentMatch(query, exactOnly = false) {
@@ -406,6 +712,9 @@ f.onsubmit = async (e) => {
             : 'Payment recorded successfully!';
 
         f.reset();
+        if (agent1Omni) agent1Omni.close();
+        if (agent2Omni) agent2Omni.close();
+        if (clientOmni) clientOmni.close();
         f.payment_date.value = new Date().toISOString().slice(0, 10);
         f.divided_by.value = '88';
         ratioSelect.value = '100';

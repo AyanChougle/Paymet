@@ -566,7 +566,7 @@ function renderOpsHierarchy(mappings) {
                                 <strong style="font-size:13px; color:var(--text);">Team Leader: ${tl.name}</strong>
                                 <span style="font-size:11px; color:var(--text-muted); margin-left:6px;">(${tl.agents.length} Agents)</span>
                             </div>
-                            <div style="display:flex; gap:12px; align-items:center; font-size:11.5px;">
+                            <div style="display:flex; gap:8px 14px; align-items:center; flex-wrap:wrap; font-size:11.5px;">
                                 <span>Team Sales: <strong style="color:var(--accent);">${fmtInr(tl.totalSales)}</strong></span>
                                 <span>Target: <strong>${tl.target > 0 ? fmtInrInt(tl.target) : '-'}</strong></span>
                                 <span>${renderTargetStatus(tl.totalSales, tl.target)}</span>

@@ -3,6 +3,7 @@ const fromInput = document.getElementById('from');
 const toInput = document.getElementById('to');
 const modeFilter = document.getElementById('modeFilter');
 const companyFilter = document.getElementById('companyFilter');
+const dateSortOrder = document.getElementById('dateSortOrder');
 const filterBtn = document.getElementById('filterBtn');
 const clearBtn = document.getElementById('clearBtn');
 const exportExcelBtn = document.getElementById('exportExcelBtn');
@@ -179,6 +180,17 @@ function applyFilters() {
         return true;
     });
 
+        // Sort the entire filtered dataset before pagination.
+    // Default to newest first; use ID as a stable tie-breaker.
+    const sortDirection = dateSortOrder ? dateSortOrder.value : 'desc';
+    filteredRows.sort((a, b) => {
+        const dateA = String(a.payment_date || '').slice(0, 10);
+        const dateB = String(b.payment_date || '').slice(0, 10);
+        let comparison = dateA.localeCompare(dateB);
+        if (comparison === 0) comparison = Number(a.id || 0) - Number(b.id || 0);
+        return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
     currentPage = 1;
     renderTable();
 }
@@ -268,6 +280,7 @@ filterBtn.onclick = applyFilters;
 searchFilter.oninput = applyFilters;
 modeFilter.onchange = applyFilters;
 companyFilter.onchange = applyFilters;
+if (dateSortOrder) dateSortOrder.onchange = applyFilters;
 fromInput.onchange = applyFilters;
 toInput.onchange = applyFilters;
 
@@ -277,6 +290,7 @@ clearBtn.onclick = () => {
     toInput.value = '';
     modeFilter.value = '';
     companyFilter.value = '';
+    if (dateSortOrder) dateSortOrder.value = 'desc';
     applyFilters();
 };
 

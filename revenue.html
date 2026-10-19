@@ -6,7 +6,7 @@
     <title>Revenue Overview | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=14">
+    <link rel="stylesheet" href="assets/css/app.css?v=18">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -35,7 +35,7 @@
                 <p class="eyebrow">Financial Analytics</p>
                 <h1>Overall Revenue & Sales Generated</h1>
             </div>
-            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+            <div class="header-meta">
                 <div id="monthPaceBadge"></div>
                 <div id="lastEntryBadge" style="font-size:11.5px; color:var(--text-muted);"></div>
             </div>
@@ -184,59 +184,56 @@
             <div id="agentPagination"></div>
         </section>
 
-        <!-- 4 & 5. BIFURCATIONS (Company & Payment Mode) -->
-        <div class="bifurcation-grid" id="bifurcationGrid">
-            <!-- 4. COMPANY RECEIVED IN BIFURCATION -->
-            <section class="panel tab-section" id="sec-company">
-                <div class="panel-head">
-                    <div>
-                        <h2>Company Received In Bifurcation</h2>
-                        <p class="panel-sub">World of Crypto (WK) vs Digital Verse (DV)</p>
-                    </div>
+        <!-- 4. COMPANY RECEIVED IN BIFURCATION (Full Width Stack) -->
+        <section class="panel tab-section" id="sec-company">
+            <div class="panel-head">
+                <div>
+                    <h2>Company Received In Bifurcation</h2>
+                    <p class="panel-sub">World of Crypto (WK) vs Digital Verse (DV)</p>
                 </div>
-                <div class="table-wrap">
-                    <table class="table-company">
-                        <thead>
-                            <tr>
-                                <th style="text-align: left;">Received Company</th>
-                                <th style="text-align: right;">Total USDT</th>
-                                <th style="text-align: right;">Total INR</th>
-                                <th style="text-align: center;">Transactions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="companyTableBody"></tbody>
-                    </table>
-                </div>
-            </section>
+            </div>
+            <div class="table-wrap">
+                <table class="table-company">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Received Company</th>
+                            <th style="text-align: right;">Total USDT</th>
+                            <th style="text-align: right;">Total INR</th>
+                            <th style="text-align: center;">Transactions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="companyTableBody"></tbody>
+                </table>
+            </div>
+        </section>
 
-            <!-- 5. PAYMENT MODE BIFURCATION -->
-            <section class="panel tab-section" id="sec-mode">
-                <div class="panel-head">
-                    <div>
-                        <h2>Payment Mode Bifurcation (P2P vs D P2P)</h2>
-                        <p class="panel-sub">USDT & INR Breakdown by Mode</p>
-                    </div>
+        <!-- 5. PAYMENT MODE BIFURCATION (Full Width Stack) -->
+        <section class="panel tab-section" id="sec-mode">
+            <div class="panel-head">
+                <div>
+                    <h2>Payment Mode Bifurcation (P2P vs D P2P)</h2>
+                    <p class="panel-sub">USDT & INR Breakdown by Mode</p>
                 </div>
-                <div class="table-wrap">
-                    <table class="table-mode">
-                        <thead>
-                            <tr>
-                                <th style="text-align: left;">Payment Mode</th>
-                                <th style="text-align: right;">Total USDT</th>
-                                <th style="text-align: right;">Total INR</th>
-                                <th style="text-align: center;">Transactions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="modeTableBody"></tbody>
-                    </table>
-                </div>
-            </section>
-        </div>
+            </div>
+            <div class="table-wrap">
+                <table class="table-mode">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Payment Mode</th>
+                            <th style="text-align: right;">Total USDT</th>
+                            <th style="text-align: right;">Total INR</th>
+                            <th style="text-align: center;">Transactions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modeTableBody"></tbody>
+                </table>
+            </div>
+        </section>
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=16"></script>
-    <script src="assets/js/auth.js?v=16"></script>
-    <script src="assets/js/revenue.js?v=16"></script>
+    <script src="assets/js/api.js?v=17"></script>
+    <script src="assets/js/auth.js?v=17"></script>
+    <script src="assets/js/revenue.js?v=17"></script>
 </body>
 </html>
