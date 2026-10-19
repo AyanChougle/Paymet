@@ -85,19 +85,13 @@
             const roleDisplay = isAdmin ? 'Admin' : (isOpsManager ? 'Ops Manager' : 'Entry User');
 
             wrap.innerHTML = `
-                <div style="padding:4px 0; width:100%; box-sizing:border-box;">
-                    <label style="font-size:10.5px; text-transform:uppercase; letter-spacing:0.8px; color:var(--text-muted); font-weight:700; display:block; margin-bottom:2px;">
-                        Logged in as
-                    </label>
-                    <div style="font-size:14px; font-weight:700; color:var(--text); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(user.name)}</div>
-                    <div style="font-size:11.5px; color:var(--text-muted); margin-top:3px; word-break:break-all; line-height:1.4;">
-                        ${escapeHtml(user.email)}
+                <div style="padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:6px; width:100%; box-sizing:border-box;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; gap:6px;">
+                        <span style="font-size:10px; text-transform:uppercase; letter-spacing:0.8px; color:var(--text-muted); font-weight:700;">Logged in as</span>
+                        <span style="font-size:10px; font-weight:700; color:var(--accent); background:rgba(30,144,255,0.12); padding:1px 6px; border-radius:3px; text-transform:uppercase;">${escapeHtml(roleDisplay)}</span>
                     </div>
-                    <div style="margin-top:3px;">
-                        <span style="display:inline-block; font-size:11px; font-weight:700; color:var(--accent); background:rgba(30,144,255,0.1); padding:1px 6px; border-radius:3px;">
-                            ${escapeHtml(roleDisplay)}
-                        </span>
-                    </div>
+                    <div style="font-size:13px; font-weight:700; color:var(--text); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(user.name)}">${escapeHtml(user.name)}</div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.3;" title="${escapeHtml(user.email)}">${escapeHtml(user.email)}</div>
                 </div>
                 <button id="logoutBtn" class="ghost danger" style="padding:7px 10px; font-size:12px; font-weight:600; width:100%; border-radius:4px; text-align:center; margin-top:4px;">Log Out</button>
             `;

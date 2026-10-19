@@ -73,7 +73,7 @@ html, body {
     top: 0;
     left: 0;
     bottom: 0;
-    width: 225px;
+    width: 236px;
     background: #080a0f;
     border-right: 1px solid var(--line);
     padding: 24px 14px;
@@ -157,6 +157,13 @@ html, body {
     gap: 8px;
     width: 100%;
     box-sizing: border-box;
+    overflow: hidden;
+}
+
+#userLogoutWrap {
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .sidebar-footer .user-info-text {
@@ -195,10 +202,10 @@ html, body {
 
 /* Main Content Area */
 .main {
-    margin-left: 225px;
+    margin-left: 236px;
     padding: 24px 30px 60px;
-    width: calc(100% - 225px);
-    max-width: calc(100vw - 225px);
+    width: calc(100% - 236px);
+    max-width: calc(100vw - 236px);
     min-height: 100vh;
     box-sizing: border-box;
 }
