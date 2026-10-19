@@ -726,10 +726,20 @@ $data = is_array($jsonBody) ? array_merge($_POST, $jsonBody) : array_merge($_POS
 try {
 // 0. HEALTH CHECK
 if ($action === 'health' || $action === 'ping') {
+    $tbls = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN) ?: [];
+    $counts = [];
+    foreach (['pp_payments', 'pp_agents', 'pp_ops_managers', 'pp_team_leaders', 'pp_clients', 'pp_users'] as $t) {
+        if (in_array($t, $tbls, true)) {
+            $counts[$t] = (int)$pdo->query("SELECT COUNT(*) FROM `$t`")->fetchColumn();
+        }
+    }
+    $payCols = in_array('pp_payments', $tbls, true) ? get_table_cols($pdo, 'pp_payments') : [];
     out([
         'status' => 'ok',
         'database' => 'connected',
-        'tables' => $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN)
+        'counts' => $counts,
+        'payment_columns' => $payCols,
+        'tables' => $tbls
     ]);
 }
 
@@ -1802,6 +1812,11 @@ if ($action === 'bulk_import') {
         $clientsList = is_array($data['clients'] ?? null) ? $data['clients'] : [];
         $paymentsList = is_array($data['payments'] ?? null) ? $data['payments'] : [];
 
+        error_log(sprintf(
+            "[Bulk Import] User '%s' started import: %d ops, %d tls, %d agents, %d clients, %d payments",
+            $creator, count($opsList), count($tlsList), count($agentsList), count($clientsList), count($paymentsList)
+        ));
+
         $saved = ['ops' => 0, 'tls' => 0, 'agents' => 0, 'clients' => 0, 'payments' => 0];
         $duplicates = ['payments' => 0];
         $errors = [];
@@ -2002,7 +2017,13 @@ if ($action === 'bulk_import') {
             'errors' => $errors
         ]);
     } catch (Throwable $mainErr) {
-        error_log("bulk_import error: " . $mainErr->getMessage());
+        $diag = sprintf(
+            "Bulk import aborted: %s at %s:%d",
+            $mainErr->getMessage(),
+            basename($mainErr->getFile()),
+            $mainErr->getLine()
+        );
+        error_log("[Bulk Import Error] " . $diag);
         err("Bulk import failed: " . $mainErr->getMessage(), 500);
     }
 }
