@@ -191,17 +191,19 @@ userForm.onsubmit = async e => {
 //   Accounts Handover (not imported: ledger entries are added on the Accounts page)
 const IMPORT_COMPANY_ALIASES = { 
     dv: 'Digital Verse', 
-    wok: 'World of Krypto', 
+
     wk: 'World of Krypto',
     'digital verse': 'Digital Verse',
     'world of krypto': 'World of Krypto',
-    'world of crypto': 'World of Krypto'
+  
 };
-const IMPORT_EMPTY_MARKERS = ['(blank)', '-', 'null', 'undefined'];
+const IMPORT_EMPTY_MARKERS = ['(blank)', '-', 'null', 'undefined', 'n/a', 'na', 'none', 'nil', '#n/a', '#value!', '#ref!', '#div/0!', '#num!', '#name?', '#null!'];
 
 const impNorm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const impClean = v => {
-    const s = String(v == null ? '' : v).replace(/[\u00A0\u200B\u200E\u200F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (v == null) return '';
+    const s = String(v).replace(/[\u00A0\u200B\u200E\u200F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/^#(N\/A|VALUE!|REF!|DIV\/0!|NUM!|NAME\?|NULL!)/i.test(s)) return '';
     return IMPORT_EMPTY_MARKERS.includes(s.toLowerCase()) ? '' : s;
 };
 const impNum = v => {
@@ -441,22 +443,22 @@ async function parseMasterWorkbook(wb, report) {
         if (stacked.ops) {
             const col = makeColMap(stacked.ops.cells, ['name', 'target'], ['opsmanagername', 'monthlytarget', 'empid', 'ecode', 'reportinglevel1', 'reportingto']);
             for (const r of stacked.ops.rows) {
-                const name = impClean(r.cells[col['opsmanagername']] || r.cells[col['name']] || r.cells[3] || r.cells[2] || '');
+                const name = impClean(col['opsmanagername'] != null ? r.cells[col['opsmanagername']] : (col['name'] != null ? r.cells[col['name']] : (r.cells[3] || r.cells[2] || '')));
                 if (!name) continue;
-                const ecode = impClean(r.cells[col['empid']] || r.cells[col['ecode']] || r.cells[1] || '');
-                const parent = impClean(r.cells[col['reportinglevel1']] || r.cells[col['reportingto']] || r.cells[4] || r.cells[3] || '');
-                const target = impNum(r.cells[col['monthlytarget']] || r.cells[col['target']] || r.cells[7] || r.cells[4]) || 0;
+                const ecode = impClean(col['empid'] != null ? r.cells[col['empid']] : (col['ecode'] != null ? r.cells[col['ecode']] : (r.cells[1] || '')));
+                const parent = impClean(col['reportinglevel1'] != null ? r.cells[col['reportinglevel1']] : (col['reportingto'] != null ? r.cells[col['reportingto']] : (r.cells[4] || r.cells[5] || '')));
+                const target = impNum(col['monthlytarget'] != null ? r.cells[col['monthlytarget']] : (col['target'] != null ? r.cells[col['target']] : (r.cells[7] || r.cells[6]))) || 0;
                 out.ops.push({ name, ecode, parent, target });
             }
         }
         if (stacked.tls) {
             const col = makeColMap(stacked.tls.cells, ['name', 'target'], ['teamleadername', 'monthlytarget', 'empid', 'ecode', 'reportinglevel1', 'reportingto', 'opsmanager']);
             for (const r of stacked.tls.rows) {
-                const name = impClean(r.cells[col['teamleadername']] || r.cells[col['name']] || r.cells[3] || r.cells[2] || '');
+                const name = impClean(col['teamleadername'] != null ? r.cells[col['teamleadername']] : (col['name'] != null ? r.cells[col['name']] : (r.cells[3] || r.cells[2] || '')));
                 if (!name) continue;
-                const ecode = impClean(r.cells[col['empid']] || r.cells[col['ecode']] || r.cells[1] || '');
-                const parent = impClean(r.cells[col['opsmanager']] || r.cells[col['reportinglevel1']] || r.cells[col['reportingto']] || r.cells[4] || '');
-                const target = impNum(r.cells[col['monthlytarget']] || r.cells[col['target']] || r.cells[8] || r.cells[4]) || 0;
+                const ecode = impClean(col['empid'] != null ? r.cells[col['empid']] : (col['ecode'] != null ? r.cells[col['ecode']] : (r.cells[1] || '')));
+                const parent = impClean(col['opsmanager'] != null ? r.cells[col['opsmanager']] : (col['reportinglevel1'] != null ? r.cells[col['reportinglevel1']] : (col['reportingto'] != null ? r.cells[col['reportingto']] : (r.cells[4] || ''))));
+                const target = impNum(col['monthlytarget'] != null ? r.cells[col['monthlytarget']] : (col['target'] != null ? r.cells[col['target']] : (r.cells[8] || r.cells[7]))) || 0;
                 out.tls.push({ name, ecode, parent, target });
             }
         }
@@ -554,11 +556,11 @@ async function parseMasterWorkbook(wb, report) {
     if (stacked && stacked.agents) {
         const col = makeColMap(stacked.agents.cells, ['empid', 'agentname'], ['opsmanager', 'teamleader', 'tl']);
         for (const row of stacked.agents.rows) {
-            const name = impClean(row.cells[col['agentname']] || row.cells[2] || '');
-            const ecode = impClean(row.cells[col['empid']] || row.cells[1] || '');
+            const name = impClean(col['agentname'] != null ? row.cells[col['agentname']] : (row.cells[2] || row.cells[1] || ''));
+            const ecode = impClean(col['empid'] != null ? row.cells[col['empid']] : (col['ecode'] != null ? row.cells[col['ecode']] : (row.cells[1] || row.cells[0] || '')));
             if (!name && !ecode) continue;
-            const rawOps = impClean(row.cells[col['opsmanager']] || row.cells[3] || '');
-            const rawTl = impClean(row.cells[col['teamleader']] || row.cells[col['tl']] || row.cells[4] || '');
+            const rawOps = impClean(col['opsmanager'] != null ? row.cells[col['opsmanager']] : (row.cells[3] || ''));
+            const rawTl = impClean(col['teamleader'] != null ? row.cells[col['teamleader']] : (col['tl'] != null ? row.cells[col['tl']] : (row.cells[4] || '')));
             const ops_manager = resolveOps(rawOps);
             const tl = resolveTl(rawTl);
             const a = { name, ecode, ops_manager, tl };
@@ -616,10 +618,28 @@ async function parseMasterWorkbook(wb, report) {
         const s = String(a).replace(/\D/g, '').slice(0, 12);
         return s.length === 12 ? s : '';
     };
+    const sanitizeEmail = e => {
+        if (!e) return '';
+        const s = impClean(e).toLowerCase();
+        if (!s || s.includes('#') || s.includes(' ') || !s.includes('@') || !s.includes('.')) return '';
+        return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(s) ? s : '';
+    };
+    const sanitizePhone = p => {
+        if (!p) return '';
+        const s = impClean(p);
+        if (s.includes('#') || /mail|consent|test|none|null/i.test(s)) return '';
+        let num = s.replace(/\D/g, '');
+        if (num.length === 12 && num.startsWith('91')) num = num.slice(2);
+        else if (num.length === 11 && num.startsWith('0')) num = num.slice(1);
+        num = num.slice(0, 10);
+        return num.length === 10 ? num : '';
+    };
     const addClient = (c, source) => {
         if (!c.client_name && !c.client_number) return;
         c.pan_no = sanitizePan(c.pan_no);
         c.aadhar_no = sanitizeAadhar(c.aadhar_no);
+        c.email_id = sanitizeEmail(c.email_id);
+        c.client_number = sanitizePhone(c.client_number) || impClean(c.client_number);
         const key = c.client_number ? 'n:' + c.client_number.toLowerCase().replace(/[^0-9]/g, '') : 'c:' + c.client_name.toLowerCase();
         const prev = clientMap.get(key);
         if (!prev) { clientMap.set(key, { ...c }); return; }
@@ -631,16 +651,16 @@ async function parseMasterWorkbook(wb, report) {
     if (stacked && stacked.clients) {
         const col = makeColMap(stacked.clients.cells, ['clientname'], ['clientnumber', 'phone', 'mobile', 'emailid', 'panno', 'aadharno', 'state']);
         for (const row of stacked.clients.rows) {
-            const name = impClean(row.cells[col['clientname']] || row.cells[0] || '');
-            const num = impClean(row.cells[col['clientnumber']] || row.cells[col['phone']] || row.cells[col['mobile']] || row.cells[1] || '');
+            const name = impClean(col['clientname'] != null ? row.cells[col['clientname']] : (row.cells[1] || row.cells[0] || ''));
+            const num = impClean(col['clientnumber'] != null ? row.cells[col['clientnumber']] : (col['phone'] != null ? row.cells[col['phone']] : (row.cells[2] || row.cells[1] || '')));
             if (!name && !num) continue;
             addClient({
                 client_name: name,
                 client_number: num,
-                email_id: impClean(row.cells[col['emailid']] || row.cells[2] || ''),
-                pan_no: impClean(row.cells[col['panno']] || row.cells[3] || '').toUpperCase(),
-                aadhar_no: impClean(row.cells[col['aadharno']] || row.cells[4] || ''),
-                state: impClean(row.cells[col['state']] || row.cells[5] || '')
+                email_id: sanitizeEmail(col['emailid'] != null ? row.cells[col['emailid']] : (row.cells[3] || '')),
+                pan_no: sanitizePan(col['panno'] != null ? row.cells[col['panno']] : (row.cells[4] || '')),
+                aadhar_no: sanitizeAadhar(col['aadharno'] != null ? row.cells[col['aadharno']] : (row.cells[5] || '')),
+                state: impClean(col['state'] != null ? row.cells[col['state']] : (row.cells[6] || ''))
             }, 'Clients');
         }
     } else {
@@ -750,9 +770,9 @@ async function parseMasterWorkbook(wb, report) {
         else if (cleanNum.length === 11 && cleanNum.startsWith('0')) cleanNum = cleanNum.slice(1);
         cleanNum = cleanNum.slice(0, 10);
 
-        const cleanPan = impClean(g('panno')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-        const cleanAadhar = impClean(g('aadharno')).replace(/\D/g, '').slice(0, 12);
-        const cleanEmail = impClean(g('emailid')).toLowerCase().trim();
+        const cleanPan = sanitizePan(g('panno'));
+        const cleanAadhar = sanitizeAadhar(g('aadharno'));
+        const cleanEmail = sanitizeEmail(g('emailid'));
 
         const p = {
             payment_date: date,
