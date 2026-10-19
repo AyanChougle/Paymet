@@ -338,7 +338,7 @@ function renderClientRow(client, query, isActive) {
             </span>
             <div class="omni-text">
                 <div class="omni-primary">${highlightedName}</div>
-                ${num ? `<div class="omni-sub"><span class="omni-phone">📞 ${highlightedNum}</span></div>` : ''}
+                ${num ? `<div class="omni-sub"><span class="omni-phone">Phone: ${highlightedNum}</span></div>` : ''}
             </div>
         </div>
         <div class="omni-item-right">

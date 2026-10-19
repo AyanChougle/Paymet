@@ -59,7 +59,7 @@ $db_host = getenv('PP_DB_HOST') ?: 'localhost';
 $db_user = getenv('PP_DB_USER') ?: '';
 $db_pass = getenv('PP_DB_PASS') ?: '';
 $db_name = getenv('PP_DB_NAME') ?: '';
-$pp_allow_wipe = true;
+$pp_allow_wipe = false; // Disabled by default for security
 
 // Credentials live in config.php (git-ignored, see config.example.php) or PP_DB_* env vars.
 if (file_exists(__DIR__ . '/config.php')) {
@@ -128,102 +128,135 @@ try {
     $pdo->exec("SET time_zone = '+05:30'");
 } catch(Throwable $e) {}
 
-// Auto-align all database table columns with live system requirements
+// Auto-align all database table columns with live system requirements safely and independently
+function safe_db_exec(PDO $pdo, string $sql, array $params = []) {
+    try {
+        if (empty($params)) {
+            $pdo->exec($sql);
+        } else {
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+        }
+    } catch (Throwable $e) {
+        error_log("safe_db_exec notice: " . $e->getMessage());
+    }
+}
+
+function get_table_cols(PDO $pdo, string $table): array {
+    static $cache = [];
+    if (!isset($cache[$table])) {
+        try {
+            $raw = $pdo->query("DESCRIBE `$table`")->fetchAll(PDO::FETCH_COLUMN) ?: [];
+            $cache[$table] = array_map('strtolower', $raw);
+        } catch (Throwable $e) {
+            $cache[$table] = [];
+        }
+    }
+    return $cache[$table];
+}
+
+// 1. pp_users
 try {
-    // 1. pp_users
-    $uCols = $pdo->query("DESCRIBE `pp_users`")->fetchAll(PDO::FETCH_COLUMN);
-    $uColLower = array_map('strtolower', $uCols ?: []);
-
-    if (!in_array('name', $uColLower) && in_array('full_name', $uColLower)) {
-        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `name` VARCHAR(150) DEFAULT NULL");
-        @$pdo->exec("UPDATE `pp_users` SET `name` = `full_name` WHERE `name` IS NULL");
+    $uCols = get_table_cols($pdo, 'pp_users');
+    if (!in_array('name', $uCols) && in_array('full_name', $uCols)) {
+        safe_db_exec($pdo, "ALTER TABLE `pp_users` ADD COLUMN `name` VARCHAR(150) DEFAULT NULL");
+        safe_db_exec($pdo, "UPDATE `pp_users` SET `name` = `full_name` WHERE `name` IS NULL");
     }
-    if (!in_array('email', $uColLower)) {
-        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `email` VARCHAR(150) DEFAULT NULL");
-        @$pdo->exec("UPDATE `pp_users` SET `email` = `full_name` WHERE `full_name` LIKE '%@%' AND (`email` IS NULL OR `email` = '')");
-        @$pdo->exec("UPDATE `pp_users` SET `email` = CONCAT(`username`, '@portal.com') WHERE `email` IS NULL OR `email` = ''");
+    if (!in_array('email', $uCols)) {
+        safe_db_exec($pdo, "ALTER TABLE `pp_users` ADD COLUMN `email` VARCHAR(150) DEFAULT NULL");
+        safe_db_exec($pdo, "UPDATE `pp_users` SET `email` = `full_name` WHERE `full_name` LIKE '%@%' AND (`email` IS NULL OR `email` = '')");
     }
-    if (!in_array('password', $uColLower) && in_array('password_hash', $uColLower)) {
-        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `password` VARCHAR(255) DEFAULT NULL");
-        @$pdo->exec("UPDATE `pp_users` SET `password` = `password_hash` WHERE `password` IS NULL");
+    if (!in_array('password', $uCols) && in_array('password_hash', $uCols)) {
+        safe_db_exec($pdo, "ALTER TABLE `pp_users` ADD COLUMN `password` VARCHAR(255) DEFAULT NULL");
+        safe_db_exec($pdo, "UPDATE `pp_users` SET `password` = `password_hash` WHERE `password` IS NULL");
     }
-    if (!in_array('password_hash', $uColLower) && in_array('password', $uColLower)) {
-        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `password_hash` VARCHAR(255) DEFAULT NULL");
-        @$pdo->exec("UPDATE `pp_users` SET `password_hash` = `password` WHERE `password_hash` IS NULL");
+    if (!in_array('password_hash', $uCols) && in_array('password', $uCols)) {
+        safe_db_exec($pdo, "ALTER TABLE `pp_users` ADD COLUMN `password_hash` VARCHAR(255) DEFAULT NULL");
+        safe_db_exec($pdo, "UPDATE `pp_users` SET `password_hash` = `password` WHERE `password_hash` IS NULL");
     }
-    if (!in_array('is_active', $uColLower)) {
-        @$pdo->exec("ALTER TABLE `pp_users` ADD COLUMN `is_active` TINYINT(1) DEFAULT 1");
+    if (!in_array('is_active', $uCols)) {
+        safe_db_exec($pdo, "ALTER TABLE `pp_users` ADD COLUMN `is_active` TINYINT(1) DEFAULT 1");
     }
-    @$pdo->exec("ALTER TABLE `pp_users` MODIFY COLUMN `role` VARCHAR(50) NOT NULL DEFAULT 'ENTRY_USER'");
-    @$pdo->exec("UPDATE `pp_users` SET `role` = 'ENTRY_USER' WHERE `role` IS NULL OR TRIM(`role`) = '' OR `role` = 'AGENT' OR `role` = 'TEAM_LEADER'");
+    safe_db_exec($pdo, "ALTER TABLE `pp_users` MODIFY COLUMN `role` VARCHAR(50) NOT NULL DEFAULT 'ENTRY_USER'");
+    safe_db_exec($pdo, "UPDATE `pp_users` SET `role` = 'ENTRY_USER' WHERE `role` IS NULL OR TRIM(`role`) = '' OR `role` = 'AGENT' OR `role` = 'TEAM_LEADER'");
+} catch (Throwable $e) { error_log("Migration pp_users: " . $e->getMessage()); }
 
-    // 2. pp_ops_managers
-    $opsCols = array_map('strtolower', $pdo->query("DESCRIBE `pp_ops_managers`")->fetchAll(PDO::FETCH_COLUMN) ?: []);
-    if (!in_array('ecode', $opsCols)) @$pdo->exec("ALTER TABLE `pp_ops_managers` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('emp_id', $opsCols)) @$pdo->exec("ALTER TABLE `pp_ops_managers` ADD COLUMN `emp_id` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('target', $opsCols)) @$pdo->exec("ALTER TABLE `pp_ops_managers` ADD COLUMN `target` DECIMAL(15,2) DEFAULT 0.00");
-    if (!in_array('monthly_target', $opsCols)) @$pdo->exec("ALTER TABLE `pp_ops_managers` ADD COLUMN `monthly_target` DECIMAL(15,2) DEFAULT 0.00");
-    if (!in_array('reporting_to', $opsCols)) @$pdo->exec("ALTER TABLE `pp_ops_managers` ADD COLUMN `reporting_to` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('reporting_level_1', $opsCols)) @$pdo->exec("ALTER TABLE `pp_ops_managers` ADD COLUMN `reporting_level_1` VARCHAR(255) DEFAULT NULL");
-    @$pdo->exec("UPDATE `pp_ops_managers` SET `ecode` = `emp_id` WHERE (`ecode` IS NULL OR `ecode` = '') AND `emp_id` IS NOT NULL AND `emp_id` != ''");
-    @$pdo->exec("UPDATE `pp_ops_managers` SET `emp_id` = `ecode` WHERE (`emp_id` IS NULL OR `emp_id` = '') AND `ecode` IS NOT NULL AND `ecode` != ''");
-    @$pdo->exec("UPDATE `pp_ops_managers` SET `target` = `monthly_target` WHERE (`target` IS NULL OR `target` = 0) AND `monthly_target` > 0");
-    @$pdo->exec("UPDATE `pp_ops_managers` SET `monthly_target` = `target` WHERE (`monthly_target` IS NULL OR `monthly_target` = 0) AND `target` > 0");
-    @$pdo->exec("UPDATE `pp_ops_managers` SET `reporting_to` = `reporting_level_1` WHERE (`reporting_to` IS NULL OR `reporting_to` = '') AND `reporting_level_1` IS NOT NULL");
-    @$pdo->exec("UPDATE `pp_ops_managers` SET `reporting_level_1` = `reporting_to` WHERE (`reporting_level_1` IS NULL OR `reporting_level_1` = '') AND `reporting_to` IS NOT NULL");
+// 2. pp_ops_managers
+try {
+    $opsCols = get_table_cols($pdo, 'pp_ops_managers');
+    if (!in_array('ecode', $opsCols)) safe_db_exec($pdo, "ALTER TABLE `pp_ops_managers` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('emp_id', $opsCols)) safe_db_exec($pdo, "ALTER TABLE `pp_ops_managers` ADD COLUMN `emp_id` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('target', $opsCols)) safe_db_exec($pdo, "ALTER TABLE `pp_ops_managers` ADD COLUMN `target` DECIMAL(15,2) DEFAULT 0.00");
+    if (!in_array('monthly_target', $opsCols)) safe_db_exec($pdo, "ALTER TABLE `pp_ops_managers` ADD COLUMN `monthly_target` DECIMAL(15,2) DEFAULT 0.00");
+    if (!in_array('reporting_to', $opsCols)) safe_db_exec($pdo, "ALTER TABLE `pp_ops_managers` ADD COLUMN `reporting_to` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('reporting_level_1', $opsCols)) safe_db_exec($pdo, "ALTER TABLE `pp_ops_managers` ADD COLUMN `reporting_level_1` VARCHAR(255) DEFAULT NULL");
+    safe_db_exec($pdo, "UPDATE `pp_ops_managers` SET `ecode` = `emp_id` WHERE (`ecode` IS NULL OR `ecode` = '') AND `emp_id` IS NOT NULL AND `emp_id` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_ops_managers` SET `emp_id` = `ecode` WHERE (`emp_id` IS NULL OR `emp_id` = '') AND `ecode` IS NOT NULL AND `ecode` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_ops_managers` SET `target` = `monthly_target` WHERE (`target` IS NULL OR `target` = 0) AND `monthly_target` > 0");
+    safe_db_exec($pdo, "UPDATE `pp_ops_managers` SET `monthly_target` = `target` WHERE (`monthly_target` IS NULL OR `monthly_target` = 0) AND `target` > 0");
+    safe_db_exec($pdo, "UPDATE `pp_ops_managers` SET `reporting_to` = `reporting_level_1` WHERE (`reporting_to` IS NULL OR `reporting_to` = '') AND `reporting_level_1` IS NOT NULL");
+    safe_db_exec($pdo, "UPDATE `pp_ops_managers` SET `reporting_level_1` = `reporting_to` WHERE (`reporting_level_1` IS NULL OR `reporting_level_1` = '') AND `reporting_to` IS NOT NULL");
+} catch (Throwable $e) { error_log("Migration pp_ops_managers: " . $e->getMessage()); }
 
-    // 3. pp_team_leaders
-    $tlCols = array_map('strtolower', $pdo->query("DESCRIBE `pp_team_leaders`")->fetchAll(PDO::FETCH_COLUMN) ?: []);
-    if (!in_array('ecode', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('emp_id', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `emp_id` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('target', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `target` DECIMAL(15,2) DEFAULT 0.00");
-    if (!in_array('monthly_target', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `monthly_target` DECIMAL(15,2) DEFAULT 0.00");
-    if (!in_array('ops_manager', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `ops_manager` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('reporting_level_1', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `reporting_level_1` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('reporting_to', $tlCols)) @$pdo->exec("ALTER TABLE `pp_team_leaders` ADD COLUMN `reporting_to` VARCHAR(255) DEFAULT NULL");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `ecode` = `emp_id` WHERE (`ecode` IS NULL OR `ecode` = '') AND `emp_id` IS NOT NULL AND `emp_id` != ''");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `emp_id` = `ecode` WHERE (`emp_id` IS NULL OR `emp_id` = '') AND `ecode` IS NOT NULL AND `ecode` != ''");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `target` = `monthly_target` WHERE (`target` IS NULL OR `target` = 0) AND `monthly_target` > 0");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `monthly_target` = `target` WHERE (`monthly_target` IS NULL OR `monthly_target` = 0) AND `target` > 0");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `ops_manager` = COALESCE(NULLIF(`reporting_level_1`,''), `reporting_to`) WHERE `ops_manager` IS NULL OR `ops_manager` = ''");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `reporting_level_1` = `ops_manager` WHERE `reporting_level_1` IS NULL OR `reporting_level_1` = ''");
-    @$pdo->exec("UPDATE `pp_team_leaders` SET `reporting_to` = `ops_manager` WHERE `reporting_to` IS NULL OR `reporting_to` = ''");
+// 3. pp_team_leaders
+try {
+    $tlCols = get_table_cols($pdo, 'pp_team_leaders');
+    if (!in_array('ecode', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('emp_id', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `emp_id` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('target', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `target` DECIMAL(15,2) DEFAULT 0.00");
+    if (!in_array('monthly_target', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `monthly_target` DECIMAL(15,2) DEFAULT 0.00");
+    if (!in_array('ops_manager', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `ops_manager` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('reporting_level_1', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `reporting_level_1` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('reporting_to', $tlCols)) safe_db_exec($pdo, "ALTER TABLE `pp_team_leaders` ADD COLUMN `reporting_to` VARCHAR(255) DEFAULT NULL");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `ecode` = `emp_id` WHERE (`ecode` IS NULL OR `ecode` = '') AND `emp_id` IS NOT NULL AND `emp_id` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `emp_id` = `ecode` WHERE (`emp_id` IS NULL OR `emp_id` = '') AND `ecode` IS NOT NULL AND `ecode` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `target` = `monthly_target` WHERE (`target` IS NULL OR `target` = 0) AND `monthly_target` > 0");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `monthly_target` = `target` WHERE (`monthly_target` IS NULL OR `monthly_target` = 0) AND `target` > 0");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `ops_manager` = COALESCE(NULLIF(`reporting_level_1`,''), `reporting_to`) WHERE `ops_manager` IS NULL OR `ops_manager` = ''");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `reporting_level_1` = `ops_manager` WHERE `reporting_level_1` IS NULL OR `reporting_level_1` = ''");
+    safe_db_exec($pdo, "UPDATE `pp_team_leaders` SET `reporting_to` = `ops_manager` WHERE `reporting_to` IS NULL OR `reporting_to` = ''");
+} catch (Throwable $e) { error_log("Migration pp_team_leaders: " . $e->getMessage()); }
 
-    // 4. pp_agents
-    $agCols = array_map('strtolower', $pdo->query("DESCRIBE `pp_agents`")->fetchAll(PDO::FETCH_COLUMN) ?: []);
-    if (!in_array('ecode', $agCols)) @$pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('emp_id', $agCols)) @$pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `emp_id` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('agent_name', $agCols)) @$pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `agent_name` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('name', $agCols)) @$pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `name` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('tl', $agCols)) @$pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `tl` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('team_leader', $agCols)) @$pdo->exec("ALTER TABLE `pp_agents` ADD COLUMN `team_leader` VARCHAR(255) DEFAULT NULL");
-    @$pdo->exec("UPDATE `pp_agents` SET `ecode` = `emp_id` WHERE (`ecode` IS NULL OR `ecode` = '') AND `emp_id` IS NOT NULL AND `emp_id` != ''");
-    @$pdo->exec("UPDATE `pp_agents` SET `emp_id` = `ecode` WHERE (`emp_id` IS NULL OR `emp_id` = '') AND `ecode` IS NOT NULL AND `ecode` != ''");
-    @$pdo->exec("UPDATE `pp_agents` SET `agent_name` = `name` WHERE (`agent_name` IS NULL OR `agent_name` = '') AND `name` IS NOT NULL AND `name` != ''");
-    @$pdo->exec("UPDATE `pp_agents` SET `name` = `agent_name` WHERE (`name` IS NULL OR `name` = '') AND `agent_name` IS NOT NULL AND `agent_name` != ''");
-    @$pdo->exec("UPDATE `pp_agents` SET `tl` = `team_leader` WHERE (`tl` IS NULL OR `tl` = '') AND `team_leader` IS NOT NULL AND `team_leader` != ''");
-    @$pdo->exec("UPDATE `pp_agents` SET `team_leader` = `tl` WHERE (`team_leader` IS NULL OR `team_leader` = '') AND `tl` IS NOT NULL AND `tl` != ''");
+// 4. pp_agents
+try {
+    $agCols = get_table_cols($pdo, 'pp_agents');
+    if (!in_array('ecode', $agCols)) safe_db_exec($pdo, "ALTER TABLE `pp_agents` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('emp_id', $agCols)) safe_db_exec($pdo, "ALTER TABLE `pp_agents` ADD COLUMN `emp_id` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('agent_name', $agCols)) safe_db_exec($pdo, "ALTER TABLE `pp_agents` ADD COLUMN `agent_name` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('name', $agCols)) safe_db_exec($pdo, "ALTER TABLE `pp_agents` ADD COLUMN `name` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('tl', $agCols)) safe_db_exec($pdo, "ALTER TABLE `pp_agents` ADD COLUMN `tl` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('team_leader', $agCols)) safe_db_exec($pdo, "ALTER TABLE `pp_agents` ADD COLUMN `team_leader` VARCHAR(255) DEFAULT NULL");
+    safe_db_exec($pdo, "UPDATE `pp_agents` SET `ecode` = `emp_id` WHERE (`ecode` IS NULL OR `ecode` = '') AND `emp_id` IS NOT NULL AND `emp_id` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_agents` SET `emp_id` = `ecode` WHERE (`emp_id` IS NULL OR `emp_id` = '') AND `ecode` IS NOT NULL AND `ecode` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_agents` SET `agent_name` = `name` WHERE (`agent_name` IS NULL OR `agent_name` = '') AND `name` IS NOT NULL AND `name` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_agents` SET `name` = `agent_name` WHERE (`name` IS NULL OR `name` = '') AND `agent_name` IS NOT NULL AND `agent_name` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_agents` SET `tl` = `team_leader` WHERE (`tl` IS NULL OR `tl` = '') AND `team_leader` IS NOT NULL AND `team_leader` != ''");
+    safe_db_exec($pdo, "UPDATE `pp_agents` SET `team_leader` = `tl` WHERE (`team_leader` IS NULL OR `team_leader` = '') AND `tl` IS NOT NULL AND `tl` != ''");
+} catch (Throwable $e) { error_log("Migration pp_agents: " . $e->getMessage()); }
 
-    // 5. pp_clients
-    $clCols = array_map('strtolower', $pdo->query("DESCRIBE `pp_clients`")->fetchAll(PDO::FETCH_COLUMN) ?: []);
-    if (!in_array('state', $clCols)) @$pdo->exec("ALTER TABLE `pp_clients` ADD COLUMN `state` VARCHAR(100) DEFAULT NULL");
+// 5. pp_clients
+try {
+    $clCols = get_table_cols($pdo, 'pp_clients');
+    if (!in_array('state', $clCols)) safe_db_exec($pdo, "ALTER TABLE `pp_clients` ADD COLUMN `state` VARCHAR(100) DEFAULT NULL");
+} catch (Throwable $e) { error_log("Migration pp_clients: " . $e->getMessage()); }
 
-    // 6. pp_payments
-    $payCols = array_map('strtolower', $pdo->query("DESCRIBE `pp_payments`")->fetchAll(PDO::FETCH_COLUMN) ?: []);
-    if (!in_array('ecode', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('e_code', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `e_code` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('tl', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `tl` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('tl_name', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `tl_name` VARCHAR(255) DEFAULT NULL");
-    if (!in_array('received_in', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `received_in` VARCHAR(100) DEFAULT 'Digital Verse'");
-    if (!in_array('received_company', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `received_company` VARCHAR(100) DEFAULT 'Digital Verse'");
-    if (!in_array('state', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `state` VARCHAR(100) DEFAULT NULL");
-    if (!in_array('payment_mode', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `payment_mode` VARCHAR(50) DEFAULT 'P2P'");
-    if (!in_array('entered_by', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `entered_by` VARCHAR(150) DEFAULT NULL");
-    if (!in_array('created_by_name', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `created_by_name` VARCHAR(150) DEFAULT NULL");
-    if (!in_array('divided_by', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `divided_by` DECIMAL(10,2) DEFAULT 88.00");
-    if (!in_array('ratio', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `ratio` VARCHAR(50) DEFAULT NULL");
-    if (!in_array('remarks', $payCols)) @$pdo->exec("ALTER TABLE `pp_payments` ADD COLUMN `remarks` TEXT DEFAULT NULL");
-} catch (Throwable $e) {}
+// 6. pp_payments
+try {
+    $payCols = get_table_cols($pdo, 'pp_payments');
+    if (!in_array('ecode', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `ecode` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('e_code', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `e_code` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('tl', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `tl` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('tl_name', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `tl_name` VARCHAR(255) DEFAULT NULL");
+    if (!in_array('received_in', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `received_in` VARCHAR(100) DEFAULT 'Digital Verse'");
+    if (!in_array('received_company', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `received_company` VARCHAR(100) DEFAULT 'Digital Verse'");
+    if (!in_array('state', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `state` VARCHAR(100) DEFAULT NULL");
+    if (!in_array('payment_mode', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `payment_mode` VARCHAR(50) DEFAULT 'P2P'");
+    if (!in_array('entered_by', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `entered_by` VARCHAR(150) DEFAULT NULL");
+    if (!in_array('created_by_name', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `created_by_name` VARCHAR(150) DEFAULT NULL");
+    if (!in_array('divided_by', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `divided_by` DECIMAL(10,2) DEFAULT 88.00");
+    if (!in_array('ratio', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `ratio` VARCHAR(50) DEFAULT NULL");
+    if (!in_array('remarks', $payCols)) safe_db_exec($pdo, "ALTER TABLE `pp_payments` ADD COLUMN `remarks` TEXT DEFAULT NULL");
+} catch (Throwable $e) { error_log("Migration pp_payments: " . $e->getMessage()); }
 
 // ========================================================
 // AUTHENTICATION & ACCESS CONTROL HELPERS (RBAC)
@@ -346,9 +379,19 @@ function is_masked($v): bool {
 }
 
 // Input sanitizer helper
+function is_excel_error(?string $val): bool {
+    if (!$val) return false;
+    $v = trim((string)$val);
+    return (bool)preg_match('/^(#N/A|#VALUE!|#REF!|#DIV/0!|#NAME\?|#NUM!|#NULL!|#N/A N/A)$/i', $v);
+}
+
+// Input sanitizer helper
 function clean_str($val, $maxLen = 255) {
     if ($val === null) return '';
     $val = trim((string)$val);
+    if (is_excel_error($val)) return '';
+    $low = strtolower($val);
+    if (in_array($low, ['(blank)', '-', 'null', 'undefined', 'na', 'n/a', 'none', 'pending'], true)) return '';
     $val = strip_tags($val);
     if ($maxLen > 0 && mb_strlen($val) > $maxLen) {
         $val = mb_substr($val, 0, $maxLen);
@@ -364,6 +407,7 @@ function to_title_case(?string $str): string {
 // KYC Rules, Normalization & Validation Helpers
 function clean_phone(?string $num): string {
     if (!$num) return '';
+    if (is_excel_error($num)) return '';
     $digits = preg_replace('/\D/', '', $num);
     if (strlen($digits) === 12 && substr($digits, 0, 2) === '91') {
         $digits = substr($digits, 2);
@@ -373,26 +417,40 @@ function clean_phone(?string $num): string {
     return substr($digits, 0, 10);
 }
 
+function clean_email(?string $email): string {
+    if (!$email) return '';
+    if (is_excel_error($email)) return '';
+    $val = strtolower(trim((string)$email));
+    if (preg_match('/(#|n/a|na|value|ref|div|null|none|pending|\(blank\))/i', $val)) return '';
+    return filter_var($val, FILTER_VALIDATE_EMAIL) ? $val : '';
+}
+
 function clean_aadhar(?string $aadhar): string {
     if (!$aadhar) return '';
-    return substr(preg_replace('/\D/', '', $aadhar), 0, 12);
+    if (is_excel_error($aadhar)) return '';
+    $val = trim((string)$aadhar);
+    if (preg_match('/(#|pending|none|null|test|na|n/a|\(blank\))/i', $val)) return '';
+    $digits = preg_replace('/\D/', '', $val);
+    if (strlen($digits) === 12) {
+        if (preg_match('/^(\d)\1{11}$/', $digits)) return '';
+        return $digits;
+    }
+    if (strpos($val, '*') !== false && strlen($val) >= 8) return substr($val, 0, 14);
+    return '';
 }
 
 function clean_pan(?string $pan): string {
     if (!$pan) return '';
+    if (is_excel_error($pan)) return '';
     $val = trim((string)$pan);
-    // Ignore placeholder, error or descriptive strings (e.g. '#N/A', 'MAIL CONSENT RECEIVED', 'NONE', 'N/A', etc.)
-    if (preg_match('/(mail|consent|received|test|none|null|pending|na|n\/a|#)/i', $val)) {
+    if (preg_match('/(#|mail|consent|received|test|none|null|pending|na|n/a|\(blank\))/i', $val)) {
         if (!preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/', strtoupper($val))) {
             return '';
         }
     }
     $cleaned = substr(strtoupper(preg_replace('/[^A-Za-z0-9*]/', '', $val)), 0, 10);
-    // A valid Indian PAN card must be exactly 10 alphanumeric characters (or masked with *)
-    if (strlen($cleaned) < 10) {
-        return '';
-    }
-    return $cleaned;
+    if (strlen($cleaned) < 10) return '';
+    return (preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/', $cleaned) || strpos($cleaned, '*') !== false) ? $cleaned : '';
 }
 
 function validate_kyc_rules(string $phone, string $pan, string $aadhar, string $email, bool $requirePhone = false): ?string {
@@ -1217,6 +1275,354 @@ if ($action === 'admin') {
     out(['users' => $users, 'stats' => ['users' => count($users), 'payments' => $paymentsCount]]);
 }
 
+// Resilient Entity Upsert Helpers - adapt dynamically to MySQL schema and preserve existing data
+function upsert_ops_manager_record(PDO $pdo, array $o): int {
+    $cols = get_table_cols($pdo, 'pp_ops_managers');
+    $name = to_title_case(clean_str($o['name'] ?? '', 150));
+    $ecode = clean_str($o['ecode'] ?? $o['emp_id'] ?? '', 50);
+    $rep = to_title_case(clean_str($o['reporting_to'] ?? $o['reporting_level_1'] ?? $o['parent'] ?? '', 150));
+    $target = max(0, floatval($o['target'] ?? $o['monthly_target'] ?? 0));
+    $id = (int)($o['id'] ?? 0);
+    $prevName = clean_str($o['prev_name'] ?? '', 150);
+
+    if (!$name && !$ecode) {
+        throw new Exception("Ops Manager name or employee code is required");
+    }
+
+    $foundId = null;
+    if ($id > 0) {
+        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE id = ?");
+        $st->execute([$id]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $prevName) {
+        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?)");
+        $st->execute([$prevName]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $ecode) {
+        $hasE = in_array('ecode', $cols, true);
+        $hasEmp = in_array('emp_id', $cols, true);
+        if ($hasE && $hasEmp) {
+            $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode, $ecode]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasE) {
+            $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(ecode)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasEmp) {
+            $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode]);
+            $foundId = $st->fetchColumn();
+        }
+    }
+    if (!$foundId && $name) {
+        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1");
+        $st->execute([$name]);
+        $foundId = $st->fetchColumn();
+    }
+
+    if ($foundId) {
+        $st = $pdo->prepare("SELECT * FROM pp_ops_managers WHERE id = ?");
+        $st->execute([$foundId]);
+        $old = $st->fetch() ?: [];
+
+        $finalName = $name ?: ($old['name'] ?? 'Unknown Ops');
+        $finalEcode = $ecode ?: ($old['ecode'] ?? $old['emp_id'] ?? null);
+        $finalRep = $rep ?: ($old['reporting_to'] ?? $old['reporting_level_1'] ?? null);
+        $finalTarget = $target > 0 ? $target : floatval($old['target'] ?? $old['monthly_target'] ?? 0);
+
+        $sets = ['name = ?'];
+        $params = [$finalName];
+        if (in_array('ecode', $cols, true)) { $sets[] = 'ecode = ?'; $params[] = $finalEcode; }
+        if (in_array('emp_id', $cols, true)) { $sets[] = 'emp_id = ?'; $params[] = $finalEcode; }
+        if (in_array('reporting_to', $cols, true)) { $sets[] = 'reporting_to = ?'; $params[] = $finalRep; }
+        if (in_array('reporting_level_1', $cols, true)) { $sets[] = 'reporting_level_1 = ?'; $params[] = $finalRep; }
+        if (in_array('target', $cols, true)) { $sets[] = 'target = ?'; $params[] = $finalTarget; }
+        if (in_array('monthly_target', $cols, true)) { $sets[] = 'monthly_target = ?'; $params[] = $finalTarget; }
+
+        $params[] = $foundId;
+        $sql = "UPDATE pp_ops_managers SET " . implode(', ', $sets) . " WHERE id = ?";
+        $pdo->prepare($sql)->execute($params);
+        return (int)$foundId;
+    } else {
+        $fields = ['name' => $name ?: 'Unknown Ops'];
+        if (in_array('ecode', $cols, true)) $fields['ecode'] = $ecode ?: null;
+        if (in_array('emp_id', $cols, true)) $fields['emp_id'] = $ecode ?: null;
+        if (in_array('reporting_to', $cols, true)) $fields['reporting_to'] = $rep ?: null;
+        if (in_array('reporting_level_1', $cols, true)) $fields['reporting_level_1'] = $rep ?: null;
+        if (in_array('target', $cols, true)) $fields['target'] = $target;
+        if (in_array('monthly_target', $cols, true)) $fields['monthly_target'] = $target;
+
+        $colList = array_keys($fields);
+        $sql = "INSERT INTO pp_ops_managers (`" . implode('`, `', $colList) . "`) VALUES (" . implode(', ', array_fill(0, count($colList), '?')) . ")";
+        $pdo->prepare($sql)->execute(array_values($fields));
+        return (int)$pdo->lastInsertId();
+    }
+}
+
+function upsert_team_leader_record(PDO $pdo, array $t): int {
+    $cols = get_table_cols($pdo, 'pp_team_leaders');
+    $name = to_title_case(clean_str($t['name'] ?? '', 150));
+    $ecode = clean_str($t['ecode'] ?? $t['emp_id'] ?? '', 50);
+    $ops = to_title_case(clean_str($t['ops_manager'] ?? $t['reporting_to'] ?? $t['reporting_level_1'] ?? $t['parent'] ?? '', 150));
+    $target = max(0, floatval($t['target'] ?? $t['monthly_target'] ?? 0));
+    $id = (int)($t['id'] ?? 0);
+    $prevName = clean_str($t['prev_name'] ?? '', 150);
+
+    if (!$name && !$ecode) {
+        throw new Exception("Team Leader name or employee code is required");
+    }
+
+    $foundId = null;
+    if ($id > 0) {
+        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE id = ?");
+        $st->execute([$id]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $prevName) {
+        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?)");
+        $st->execute([$prevName]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $ecode) {
+        $hasE = in_array('ecode', $cols, true);
+        $hasEmp = in_array('emp_id', $cols, true);
+        if ($hasE && $hasEmp) {
+            $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode, $ecode]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasE) {
+            $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(ecode)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasEmp) {
+            $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode]);
+            $foundId = $st->fetchColumn();
+        }
+    }
+    if (!$foundId && $name) {
+        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1");
+        $st->execute([$name]);
+        $foundId = $st->fetchColumn();
+    }
+
+    if ($foundId) {
+        $st = $pdo->prepare("SELECT * FROM pp_team_leaders WHERE id = ?");
+        $st->execute([$foundId]);
+        $old = $st->fetch() ?: [];
+
+        $finalName = $name ?: ($old['name'] ?? 'Unknown TL');
+        $finalEcode = $ecode ?: ($old['ecode'] ?? $old['emp_id'] ?? null);
+        $finalOps = $ops ?: ($old['ops_manager'] ?? $old['reporting_to'] ?? $old['reporting_level_1'] ?? null);
+        $finalTarget = $target > 0 ? $target : floatval($old['target'] ?? $old['monthly_target'] ?? 0);
+
+        $sets = ['name = ?'];
+        $params = [$finalName];
+        if (in_array('ecode', $cols, true)) { $sets[] = 'ecode = ?'; $params[] = $finalEcode; }
+        if (in_array('emp_id', $cols, true)) { $sets[] = 'emp_id = ?'; $params[] = $finalEcode; }
+        if (in_array('ops_manager', $cols, true)) { $sets[] = 'ops_manager = ?'; $params[] = $finalOps; }
+        if (in_array('reporting_to', $cols, true)) { $sets[] = 'reporting_to = ?'; $params[] = $finalOps; }
+        if (in_array('reporting_level_1', $cols, true)) { $sets[] = 'reporting_level_1 = ?'; $params[] = $finalOps; }
+        if (in_array('target', $cols, true)) { $sets[] = 'target = ?'; $params[] = $finalTarget; }
+        if (in_array('monthly_target', $cols, true)) { $sets[] = 'monthly_target = ?'; $params[] = $finalTarget; }
+
+        $params[] = $foundId;
+        $sql = "UPDATE pp_team_leaders SET " . implode(', ', $sets) . " WHERE id = ?";
+        $pdo->prepare($sql)->execute($params);
+        return (int)$foundId;
+    } else {
+        $fields = ['name' => $name ?: 'Unknown TL'];
+        if (in_array('ecode', $cols, true)) $fields['ecode'] = $ecode ?: null;
+        if (in_array('emp_id', $cols, true)) $fields['emp_id'] = $ecode ?: null;
+        if (in_array('ops_manager', $cols, true)) $fields['ops_manager'] = $ops ?: null;
+        if (in_array('reporting_to', $cols, true)) $fields['reporting_to'] = $ops ?: null;
+        if (in_array('reporting_level_1', $cols, true)) $fields['reporting_level_1'] = $ops ?: null;
+        if (in_array('target', $cols, true)) $fields['target'] = $target;
+        if (in_array('monthly_target', $cols, true)) $fields['monthly_target'] = $target;
+
+        $colList = array_keys($fields);
+        $sql = "INSERT INTO pp_team_leaders (`" . implode('`, `', $colList) . "`) VALUES (" . implode(', ', array_fill(0, count($colList), '?')) . ")";
+        $pdo->prepare($sql)->execute(array_values($fields));
+        return (int)$pdo->lastInsertId();
+    }
+}
+
+function upsert_agent_record(PDO $pdo, array $a): int {
+    $cols = get_table_cols($pdo, 'pp_agents');
+    $name = to_title_case(clean_str($a['name'] ?? $a['agent_name'] ?? '', 150));
+    $ecode = clean_str($a['ecode'] ?? $a['emp_id'] ?? '', 50);
+    $ops = to_title_case(clean_str($a['ops_manager'] ?? '', 150));
+    $tl = to_title_case(clean_str($a['tl'] ?? $a['team_leader'] ?? '', 150));
+    $id = (int)($a['id'] ?? 0);
+    $isActive = isset($a['is_active']) ? (int)$a['is_active'] : 1;
+
+    if (!$name && !$ecode) {
+        throw new Exception("Agent name or employee code is required");
+    }
+
+    $foundId = null;
+    if ($id > 0) {
+        $st = $pdo->prepare("SELECT id FROM pp_agents WHERE id = ?");
+        $st->execute([$id]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $ecode) {
+        $hasE = in_array('ecode', $cols, true);
+        $hasEmp = in_array('emp_id', $cols, true);
+        if ($hasE && $hasEmp) {
+            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode, $ecode]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasE) {
+            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasEmp) {
+            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(emp_id)) = LOWER(?) LIMIT 1");
+            $st->execute([$ecode]);
+            $foundId = $st->fetchColumn();
+        }
+    }
+    if (!$foundId && $name) {
+        $hasAgentName = in_array('agent_name', $cols, true);
+        $hasName = in_array('name', $cols, true);
+        if ($hasAgentName && $hasName) {
+            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?) LIMIT 1");
+            $st->execute([$name, $name]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasAgentName) {
+            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) LIMIT 1");
+            $st->execute([$name]);
+            $foundId = $st->fetchColumn();
+        } elseif ($hasName) {
+            $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1");
+            $st->execute([$name]);
+            $foundId = $st->fetchColumn();
+        }
+    }
+
+    if ($foundId) {
+        $st = $pdo->prepare("SELECT * FROM pp_agents WHERE id = ?");
+        $st->execute([$foundId]);
+        $old = $st->fetch() ?: [];
+
+        $finalName = $name ?: ($old['agent_name'] ?? $old['name'] ?? 'Unknown Agent');
+        $finalEcode = $ecode ?: ($old['ecode'] ?? $old['emp_id'] ?? null);
+        $finalOps = $ops ?: ($old['ops_manager'] ?? null);
+        $finalTl = $tl ?: ($old['tl'] ?? $old['team_leader'] ?? null);
+
+        $sets = [];
+        $params = [];
+        if (in_array('agent_name', $cols, true)) { $sets[] = 'agent_name = ?'; $params[] = $finalName; }
+        if (in_array('name', $cols, true)) { $sets[] = 'name = ?'; $params[] = $finalName; }
+        if (in_array('ecode', $cols, true)) { $sets[] = 'ecode = ?'; $params[] = $finalEcode; }
+        if (in_array('emp_id', $cols, true)) { $sets[] = 'emp_id = ?'; $params[] = $finalEcode; }
+        if (in_array('ops_manager', $cols, true)) { $sets[] = 'ops_manager = ?'; $params[] = $finalOps; }
+        if (in_array('tl', $cols, true)) { $sets[] = 'tl = ?'; $params[] = $finalTl; }
+        if (in_array('team_leader', $cols, true)) { $sets[] = 'team_leader = ?'; $params[] = $finalTl; }
+        if (in_array('is_active', $cols, true)) { $sets[] = 'is_active = ?'; $params[] = $isActive; }
+
+        if (!empty($sets)) {
+            $params[] = $foundId;
+            $sql = "UPDATE pp_agents SET " . implode(', ', $sets) . " WHERE id = ?";
+            $pdo->prepare($sql)->execute($params);
+        }
+        return (int)$foundId;
+    } else {
+        $fields = [];
+        $finalName = $name ?: ($ecode ?: 'Unknown Agent');
+        if (in_array('agent_name', $cols, true)) $fields['agent_name'] = $finalName;
+        if (in_array('name', $cols, true)) $fields['name'] = $finalName;
+        if (in_array('ecode', $cols, true)) $fields['ecode'] = $ecode ?: null;
+        if (in_array('emp_id', $cols, true)) $fields['emp_id'] = $ecode ?: null;
+        if (in_array('ops_manager', $cols, true)) $fields['ops_manager'] = $ops ?: null;
+        if (in_array('tl', $cols, true)) $fields['tl'] = $tl ?: null;
+        if (in_array('team_leader', $cols, true)) $fields['team_leader'] = $tl ?: null;
+        if (in_array('is_active', $cols, true)) $fields['is_active'] = $isActive;
+
+        $colList = array_keys($fields);
+        $sql = "INSERT INTO pp_agents (`" . implode('`, `', $colList) . "`) VALUES (" . implode(', ', array_fill(0, count($colList), '?')) . ")";
+        $pdo->prepare($sql)->execute(array_values($fields));
+        return (int)$pdo->lastInsertId();
+    }
+}
+
+function upsert_client_record(PDO $pdo, array $c): int {
+    $cols = get_table_cols($pdo, 'pp_clients');
+    $cName = to_title_case(clean_str($c['client_name'] ?? $c['name'] ?? '', 150));
+    $cNum = clean_phone($c['client_number'] ?? $c['phone'] ?? $c['mobile'] ?? '');
+    $email = clean_email($c['email_id'] ?? $c['email'] ?? '');
+    $pan = clean_pan($c['pan_no'] ?? $c['pan'] ?? '');
+    $aadhar = clean_aadhar($c['aadhar_no'] ?? $c['aadhar'] ?? '');
+    $state = clean_str($c['state'] ?? '', 100);
+    $id = (int)($c['id'] ?? 0);
+
+    if (!$cName && !$cNum) {
+        throw new Exception("Client Name or Phone Number is required");
+    }
+
+    $foundId = null;
+    if ($id > 0) {
+        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE id = ?");
+        $st->execute([$id]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $cNum) {
+        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE client_number = ? LIMIT 1");
+        $st->execute([$cNum]);
+        $foundId = $st->fetchColumn();
+    }
+    if (!$foundId && $cName) {
+        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(TRIM(client_name)) = LOWER(?) LIMIT 1");
+        $st->execute([$cName]);
+        $foundId = $st->fetchColumn();
+    }
+
+    if ($foundId) {
+        $st = $pdo->prepare("SELECT * FROM pp_clients WHERE id = ?");
+        $st->execute([$foundId]);
+        $old = $st->fetch() ?: [];
+
+        $finalName = $cName ?: ($old['client_name'] ?? 'Unknown Client');
+        $finalNum = $cNum ?: ($old['client_number'] ?? null);
+        $finalEmail = $email ?: ($old['email_id'] ?? null);
+        $finalPan = $pan ?: ($old['pan_no'] ?? null);
+        $finalAadhar = $aadhar ?: ($old['aadhar_no'] ?? null);
+        $finalState = $state ?: ($old['state'] ?? null);
+
+        $sets = ['client_name = ?', 'client_number = ?', 'email_id = ?', 'pan_no = ?', 'aadhar_no = ?'];
+        $params = [$finalName, $finalNum, $finalEmail, $finalPan, $finalAadhar];
+        if (in_array('state', $cols, true)) {
+            $sets[] = 'state = ?';
+            $params[] = $finalState;
+        }
+        $params[] = $foundId;
+
+        $sql = "UPDATE pp_clients SET " . implode(', ', $sets) . " WHERE id = ?";
+        $pdo->prepare($sql)->execute($params);
+        return (int)$foundId;
+    } else {
+        $fields = [
+            'client_name' => $cName ?: 'Unknown Client',
+            'client_number' => $cNum ?: null,
+            'email_id' => $email ?: null,
+            'pan_no' => $pan ?: null,
+            'aadhar_no' => $aadhar ?: null
+        ];
+        if (in_array('state', $cols, true)) {
+            $fields['state'] = $state ?: null;
+        }
+
+        $colList = array_keys($fields);
+        $sql = "INSERT INTO pp_clients (`" . implode('`, `', $colList) . "`) VALUES (" . implode(', ', array_fill(0, count($colList), '?')) . ")";
+        $pdo->prepare($sql)->execute(array_values($fields));
+        return (int)$pdo->lastInsertId();
+    }
+}
+
 // Resilient payment insertion helper - adapts to whatever columns exist in the database table
 function insert_payment_row(PDO $pdo, array $fields): int {
     static $cols = null;
@@ -1397,255 +1803,202 @@ if ($action === 'bulk_import') {
         $paymentsList = is_array($data['payments'] ?? null) ? $data['payments'] : [];
 
         $saved = ['ops' => 0, 'tls' => 0, 'agents' => 0, 'clients' => 0, 'payments' => 0];
+        $duplicates = ['payments' => 0];
         $errors = [];
 
         // 1. Ops Managers
         foreach ($opsList as $o) {
             $name = clean_str($o['name'] ?? '', 150);
-            if (!$name) continue;
             $ecode = clean_str($o['ecode'] ?? '', 50);
-            $rep = clean_str($o['reporting_to'] ?? $o['parent'] ?? '', 150);
-            $target = max(0, floatval($o['target'] ?? 0));
+            if (!$name && !$ecode) continue;
+            try {
+                upsert_ops_manager_record($pdo, $o);
+                $saved['ops']++;
+            } catch (Throwable $e) {
+                $errors[] = "Ops Manager " . ($name ?: $ecode) . ": " . $e->getMessage();
+            }
+        }
+
+        // 2. Team Leaders
+        foreach ($tlsList as $t) {
+            $name = clean_str($t['name'] ?? '', 150);
+            $ecode = clean_str($t['ecode'] ?? '', 50);
+            if (!$name && !$ecode) continue;
+            try {
+                upsert_team_leader_record($pdo, $t);
+                $saved['tls']++;
+            } catch (Throwable $e) {
+                $errors[] = "Team Leader " . ($name ?: $ecode) . ": " . $e->getMessage();
+            }
+        }
+
+        // 3. Agents
+        foreach ($agentsList as $a) {
+            $name = clean_str($a['name'] ?? $a['agent_name'] ?? '', 150);
+            $ecode = clean_str($a['ecode'] ?? $a['emp_id'] ?? '', 50);
+            if (!$name && !$ecode) continue;
+            try {
+                upsert_agent_record($pdo, $a);
+                $saved['agents']++;
+            } catch (Throwable $e) {
+                $errors[] = "Agent " . ($name ?: $ecode) . ": " . $e->getMessage();
+            }
+        }
+
+        // 4. Clients KYC
+        foreach ($clientsList as $c) {
+            $cName = clean_str($c['client_name'] ?? $c['name'] ?? '', 150);
+            $cNum = clean_phone($c['client_number'] ?? $c['phone'] ?? '');
+            if (!$cName && !$cNum) continue;
+            try {
+                upsert_client_record($pdo, $c);
+                $saved['clients']++;
+            } catch (Throwable $e) {
+                $errors[] = "Client " . ($cName ?: $cNum) . ": " . $e->getMessage();
+            }
+        }
+
+        // 5. Payments
+        $liveAgentsByCode = [];
+        $liveAgentsByName = [];
+        try {
+            $agRows = $pdo->query("SELECT * FROM pp_agents")->fetchAll();
+            foreach ($agRows as $ar) {
+                $c = strtolower(trim((string)($ar['ecode'] ?? $ar['emp_id'] ?? '')));
+                $n = strtolower(trim((string)($ar['agent_name'] ?? $ar['name'] ?? '')));
+                $item = [
+                    'ecode' => trim((string)($ar['ecode'] ?? $ar['emp_id'] ?? '')),
+                    'name' => trim((string)($ar['agent_name'] ?? $ar['name'] ?? '')),
+                    'ops' => trim((string)($ar['ops_manager'] ?? '')),
+                    'tl' => trim((string)($ar['tl'] ?? $ar['team_leader'] ?? ''))
+                ];
+                if ($c !== '') $liveAgentsByCode[$c] = $item;
+                if ($n !== '') $liveAgentsByName[$n] = $item;
+            }
+        } catch (Throwable $e) {}
+
+        $existingKeys = [];
+        try {
+            $st = $pdo->query("SELECT payment_date, ecode, agent_name, client_number, client_name, usdt, inr_amount, payment_mode, received_in FROM pp_payments");
+            while ($r = $st->fetch()) {
+                $k = implode('|', [
+                    substr((string)($r['payment_date'] ?? ''), 0, 10),
+                    strtolower(trim((string)($r['ecode'] ?? $r['agent_name'] ?? ''))),
+                    strtolower(trim((string)(clean_phone($r['client_number'] ?? '') ?: clean_str($r['client_name'] ?? '')))),
+                    number_format(floatval($r['usdt'] ?? 0), 2, '.', ''),
+                    number_format(floatval($r['inr_amount'] ?? 0), 2, '.', ''),
+                    strtoupper(trim((string)($r['payment_mode'] ?? 'P2P'))),
+                    strtolower(trim((string)($r['received_in'] ?? '')))
+                ]);
+                $existingKeys[$k] = true;
+            }
+        } catch (Throwable $e) {}
+
+        foreach ($paymentsList as $idx => $p) {
+            $pDate = clean_str($p['payment_date'] ?? date('Y-m-d'), 20);
+            $agent = clean_str($p['agent_name'] ?? '', 150);
+            $ecode = clean_str($p['ecode'] ?? $p['emp_id'] ?? '', 50);
+
+            $matched = null;
+            if ($ecode !== '' && isset($liveAgentsByCode[strtolower($ecode)])) {
+                $matched = $liveAgentsByCode[strtolower($ecode)];
+            } elseif ($agent !== '' && strtolower($agent) !== 'unassigned agent' && isset($liveAgentsByName[strtolower($agent)])) {
+                $matched = $liveAgentsByName[strtolower($agent)];
+            }
+
+            if ($matched) {
+                if ($matched['name'] && (!$agent || strtolower($agent) === 'unassigned agent')) $agent = $matched['name'];
+                if ($matched['ecode'] && !$ecode) $ecode = $matched['ecode'];
+                if ($matched['ops'] && empty($p['ops_manager'])) $p['ops_manager'] = $matched['ops'];
+                if ($matched['tl'] && empty($p['tl'])) $p['tl'] = $matched['tl'];
+            }
+
+            if (!$agent) $agent = $ecode ?: 'Unassigned Agent';
+            $usdt = round((float)($p['usdt'] ?? 0), 2);
+            $inr = round((float)($p['inr_amount'] ?? 0), 2);
+            if ($usdt <= 0 && $inr <= 0) continue;
+
+            $tl = clean_str($p['tl'] ?? '', 150);
+            $ops = clean_str($p['ops_manager'] ?? '', 150);
+            $cName = clean_str($p['client_name'] ?? '', 150);
+            $cNum = clean_phone($p['client_number'] ?? '');
+            $email = clean_email($p['email_id'] ?? '');
+            $mode = clean_str($p['payment_mode'] ?? 'P2P', 50);
+            $ratio = clean_str($p['ratio'] ?? '', 50);
+            $pan = clean_pan($p['pan_no'] ?? '');
+            $aadhar = clean_aadhar($p['aadhar_no'] ?? '');
+            $state = clean_str($p['state'] ?? '', 100);
+            $recIn = clean_str($p['received_in'] ?? $p['received_company'] ?? 'Digital Verse', 100);
+            $recLow = strtolower($recIn);
+            if (strpos($recLow, 'world') !== false || strpos($recLow, 'krypto') !== false || strpos($recLow, 'crypto') !== false || strpos($recLow, 'wk') !== false) {
+                $recIn = (strpos($recLow, 'crypto') !== false) ? 'World of Crypto' : 'World of Krypto';
+            } elseif (strpos($recLow, 'digital') !== false || strpos($recLow, 'dv') !== false) {
+                $recIn = 'Digital Verse';
+            }
+            $div = round((float)($p['divided_by'] ?? 0), 2);
+            if ($usdt > 0 && $inr > 0 && ($div <= 0 || !isset($p['divided_by']))) {
+                $div = round($inr / $usdt, 4);
+            }
+            if ($div <= 0) $div = 88;
+
+            $key = implode('|', [
+                substr($pDate, 0, 10),
+                strtolower($ecode ?: $agent),
+                strtolower($cNum ?: $cName),
+                number_format($usdt, 2, '.', ''),
+                number_format($inr, 2, '.', ''),
+                strtoupper($mode ?: 'P2P'),
+                strtolower($recIn)
+            ]);
+
+            if (isset($existingKeys[$key])) {
+                $duplicates['payments']++;
+                continue;
+            }
 
             try {
-                $foundId = null;
-                if ($ecode) {
-                    $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-                    $st->execute([$ecode, $ecode]);
-                    $foundId = $st->fetchColumn();
-                }
-            if (!$foundId) {
-                $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?)");
-                $st->execute([$name]);
-                $foundId = $st->fetchColumn();
+                insert_payment_row($pdo, [
+                    'payment_date' => $pDate,
+                    'ecode' => $ecode ?: null,
+                    'e_code' => $ecode ?: null,
+                    'agent_name' => $agent,
+                    'tl' => $tl ?: null,
+                    'tl_name' => $tl ?: null,
+                    'ops_manager' => $ops ?: null,
+                    'client_name' => $cName ?: null,
+                    'client_number' => $cNum ?: null,
+                    'email_id' => $email ?: null,
+                    'payment_mode' => $mode ?: 'P2P',
+                    'usdt' => $usdt,
+                    'divided_by' => $div,
+                    'inr_amount' => $inr,
+                    'ratio' => $ratio ?: null,
+                    'pan_no' => $pan ?: null,
+                    'aadhar_no' => $aadhar ?: null,
+                    'state' => $state ?: null,
+                    'received_in' => $recIn ?: 'Digital Verse',
+                    'received_company' => $recIn ?: 'Digital Verse',
+                    'entered_by' => $creator,
+                    'created_by_name' => $creator,
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'entry_timestamp' => date('Y-m-d H:i:s')
+                ]);
+                $existingKeys[$key] = true;
+                $saved['payments']++;
+            } catch (Throwable $pe) {
+                $errors[] = "Payment row " . ($idx + 1) . " ($pDate - $agent): " . $pe->getMessage();
             }
-            if ($foundId) {
-                $pdo->prepare("UPDATE pp_ops_managers SET name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), reporting_to = COALESCE(NULLIF(?, ''), reporting_to), target = CASE WHEN ? > 0 THEN ? ELSE target END WHERE id = ?")
-                    ->execute([$name, $ecode, $ecode, $rep, $target, $target, $foundId]);
-            } else {
-                $pdo->prepare("INSERT INTO pp_ops_managers (name, ecode, emp_id, reporting_to, target) VALUES (?, ?, ?, ?, ?)")
-                    ->execute([$name, $ecode ?: null, $ecode ?: null, $rep ?: null, $target]);
-            }
-            $saved['ops']++;
-        } catch (Throwable $e) {
-            $errors[] = "Ops Manager $name: " . $e->getMessage();
-        }
-    }
-
-    // 2. Team Leaders
-    foreach ($tlsList as $t) {
-        $name = clean_str($t['name'] ?? '', 150);
-        if (!$name) continue;
-        $ecode = clean_str($t['ecode'] ?? '', 50);
-        $ops = clean_str($t['ops_manager'] ?? $t['parent'] ?? '', 150);
-        $target = max(0, floatval($t['target'] ?? 0));
-
-        try {
-            $foundId = null;
-            if ($ecode) {
-                $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-                $st->execute([$ecode, $ecode]);
-                $foundId = $st->fetchColumn();
-            }
-            if (!$foundId) {
-                $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?)");
-                $st->execute([$name]);
-                $foundId = $st->fetchColumn();
-            }
-            if ($foundId) {
-                $pdo->prepare("UPDATE pp_team_leaders SET name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), ops_manager = COALESCE(NULLIF(?, ''), ops_manager), target = CASE WHEN ? > 0 THEN ? ELSE target END WHERE id = ?")
-                    ->execute([$name, $ecode, $ecode, $ops, $target, $target, $foundId]);
-            } else {
-                $pdo->prepare("INSERT INTO pp_team_leaders (name, ecode, emp_id, ops_manager, target) VALUES (?, ?, ?, ?, ?)")
-                    ->execute([$name, $ecode ?: null, $ecode ?: null, $ops ?: null, $target]);
-            }
-            $saved['tls']++;
-        } catch (Throwable $e) {
-            $errors[] = "Team Leader $name: " . $e->getMessage();
-        }
-    }
-
-    // 3. Agents
-    foreach ($agentsList as $a) {
-        $name = clean_str($a['name'] ?? $a['agent_name'] ?? '', 150);
-        $ecode = clean_str($a['ecode'] ?? $a['emp_id'] ?? '', 50);
-        if (!$name && !$ecode) continue;
-        if (!$name) $name = $ecode;
-        $ops = clean_str($a['ops_manager'] ?? '', 150);
-        $tl = clean_str($a['tl'] ?? $a['team_leader'] ?? '', 150);
-
-        try {
-            $foundId = null;
-            if ($ecode) {
-                $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-                $st->execute([$ecode, $ecode]);
-                $foundId = $st->fetchColumn();
-            }
-            if (!$foundId && $name) {
-                $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?)");
-                $st->execute([$name, $name]);
-                $foundId = $st->fetchColumn();
-            }
-            if ($foundId) {
-                $pdo->prepare("UPDATE pp_agents SET agent_name = ?, name = ?, ecode = COALESCE(NULLIF(?, ''), ecode), emp_id = COALESCE(NULLIF(?, ''), emp_id), ops_manager = COALESCE(NULLIF(?, ''), ops_manager), tl = COALESCE(NULLIF(?, ''), tl) WHERE id = ?")
-                    ->execute([$name, $name, $ecode, $ecode, $ops, $tl, $foundId]);
-            } else {
-                $pdo->prepare("INSERT INTO pp_agents (agent_name, name, ecode, emp_id, ops_manager, tl) VALUES (?, ?, ?, ?, ?, ?)")
-                    ->execute([$name, $name, $ecode ?: null, $ecode ?: null, $ops ?: null, $tl ?: null]);
-            }
-            $saved['agents']++;
-        } catch (Throwable $e) {
-            $errors[] = "Agent $name: " . $e->getMessage();
-        }
-    }
-
-    // 4. Clients KYC
-    foreach ($clientsList as $c) {
-        $cName = clean_str($c['client_name'] ?? $c['name'] ?? '', 150);
-        $cNum = clean_phone($c['client_number'] ?? $c['phone'] ?? '');
-        if (!$cName && !$cNum) continue;
-        $email = strtolower(trim(clean_str($c['email_id'] ?? $c['email'] ?? '', 150)));
-        $pan = clean_pan($c['pan_no'] ?? $c['pan'] ?? '');
-        $aadhar = clean_aadhar($c['aadhar_no'] ?? $c['aadhar'] ?? '');
-        $state = clean_str($c['state'] ?? '', 100);
-
-        try {
-            $foundId = null;
-            if ($cNum) {
-                $st = $pdo->prepare("SELECT id FROM pp_clients WHERE client_number = ? LIMIT 1");
-                $st->execute([$cNum]);
-                $foundId = $st->fetchColumn();
-            }
-            if (!$foundId && $cName) {
-                $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(TRIM(client_name)) = LOWER(?) LIMIT 1");
-                $st->execute([$cName]);
-                $foundId = $st->fetchColumn();
-            }
-            if ($foundId) {
-                $pdo->prepare("UPDATE pp_clients SET 
-                    client_name = COALESCE(NULLIF(?, ''), client_name),
-                    client_number = COALESCE(NULLIF(?, ''), client_number),
-                    email_id = COALESCE(NULLIF(?, ''), email_id),
-                    pan_no = COALESCE(NULLIF(?, ''), pan_no),
-                    aadhar_no = COALESCE(NULLIF(?, ''), aadhar_no),
-                    state = COALESCE(NULLIF(?, ''), state)
-                    WHERE id = ?")
-                    ->execute([$cName, $cNum, $email, $pan, $aadhar, $state, $foundId]);
-            } else {
-                $pdo->prepare("INSERT INTO pp_clients (client_name, client_number, email_id, pan_no, aadhar_no, state) VALUES (?, ?, ?, ?, ?, ?)")
-                    ->execute([$cName ?: 'Unknown', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null]);
-            }
-            $saved['clients']++;
-        } catch (Throwable $e) {
-            $errors[] = "Client " . ($cName ?: $cNum) . ": " . $e->getMessage();
-        }
-    }
-
-    // 5. Payments
-    // Build quick in-memory agent lookup maps from freshly synced pp_agents table
-    $liveAgentsByCode = [];
-    $liveAgentsByName = [];
-    try {
-        $agRows = $pdo->query("SELECT ecode, emp_id, agent_name, name, ops_manager, tl, team_leader FROM pp_agents")->fetchAll();
-        foreach ($agRows as $ar) {
-            $c = strtolower(trim($ar['ecode'] ?? $ar['emp_id'] ?? ''));
-            $n = strtolower(trim($ar['agent_name'] ?? $ar['name'] ?? ''));
-            $item = [
-                'ecode' => trim($ar['ecode'] ?? $ar['emp_id'] ?? ''),
-                'name' => trim($ar['agent_name'] ?? $ar['name'] ?? ''),
-                'ops' => trim($ar['ops_manager'] ?? ''),
-                'tl' => trim($ar['tl'] ?? $ar['team_leader'] ?? '')
-            ];
-            if ($c !== '') $liveAgentsByCode[$c] = $item;
-            if ($n !== '') $liveAgentsByName[$n] = $item;
-        }
-    } catch (Throwable $e) {}
-
-    foreach ($paymentsList as $p) {
-        $pDate = clean_str($p['payment_date'] ?? date('Y-m-d'), 20);
-        $agent = clean_str($p['agent_name'] ?? '', 150);
-        $ecode = clean_str($p['ecode'] ?? $p['emp_id'] ?? '', 50);
-
-        // Dynamically link agent directory if ecode or agent name is available
-        $matched = null;
-        if ($ecode !== '' && isset($liveAgentsByCode[strtolower($ecode)])) {
-            $matched = $liveAgentsByCode[strtolower($ecode)];
-        } elseif ($agent !== '' && strtolower($agent) !== 'unassigned agent' && isset($liveAgentsByName[strtolower($agent)])) {
-            $matched = $liveAgentsByName[strtolower($agent)];
         }
 
-        if ($matched) {
-            if ($matched['name'] && (!$agent || strtolower($agent) === 'unassigned agent')) $agent = $matched['name'];
-            if ($matched['ecode'] && !$ecode) $ecode = $matched['ecode'];
-            if ($matched['ops'] && empty($p['ops_manager'])) $p['ops_manager'] = $matched['ops'];
-            if ($matched['tl'] && empty($p['tl'])) $p['tl'] = $matched['tl'];
-        }
-
-        if (!$agent) $agent = $ecode ?: 'Unassigned Agent';
-        $usdt = round((float)($p['usdt'] ?? 0), 2);
-        $inr = round((float)($p['inr_amount'] ?? 0), 2);
-        if ($usdt <= 0 && $inr <= 0) continue;
-
-        $tl = clean_str($p['tl'] ?? '', 150);
-        $ops = clean_str($p['ops_manager'] ?? '', 150);
-        $cName = clean_str($p['client_name'] ?? '', 150);
-        $cNum = clean_phone($p['client_number'] ?? '');
-        $email = strtolower(trim(clean_str($p['email_id'] ?? '', 150)));
-        $mode = clean_str($p['payment_mode'] ?? 'P2P', 50);
-        $ratio = clean_str($p['ratio'] ?? '', 50);
-        $pan = clean_pan($p['pan_no'] ?? '');
-        $aadhar = clean_aadhar($p['aadhar_no'] ?? '');
-        $state = clean_str($p['state'] ?? '', 100);
-        $recIn = clean_str($p['received_in'] ?? $p['received_company'] ?? 'Digital Verse', 100);
-        $recLow = strtolower($recIn);
-        if (strpos($recLow, 'world') !== false || strpos($recLow, 'krypto') !== false || strpos($recLow, 'crypto') !== false || strpos($recLow, 'wk') !== false) {
-            $recIn = (strpos($recLow, 'crypto') !== false) ? 'World of Crypto' : 'World of Krypto';
-        } elseif (strpos($recLow, 'digital') !== false || strpos($recLow, 'dv') !== false) {
-            $recIn = 'Digital Verse';
-        }
-        $div = round((float)($p['divided_by'] ?? 0), 2);
-        if ($usdt > 0 && $inr > 0 && ($div <= 0 || !isset($p['divided_by']))) {
-            $div = round($inr / $usdt, 4);
-        }
-        if ($div <= 0) $div = 88;
-
-        try {
-            insert_payment_row($pdo, [
-                'payment_date' => $pDate,
-                'ecode' => $ecode ?: null,
-                'e_code' => $ecode ?: null,
-                'agent_name' => $agent,
-                'tl' => $tl ?: null,
-                'tl_name' => $tl ?: null,
-                'ops_manager' => $ops ?: null,
-                'client_name' => $cName ?: null,
-                'client_number' => $cNum ?: null,
-                'email_id' => $email ?: null,
-                'payment_mode' => $mode ?: 'P2P',
-                'usdt' => $usdt,
-                'divided_by' => $div,
-                'inr_amount' => $inr,
-                'ratio' => $ratio ?: null,
-                'pan_no' => $pan ?: null,
-                'aadhar_no' => $aadhar ?: null,
-                'state' => $state ?: null,
-                'received_in' => $recIn ?: 'Digital Verse',
-                'received_company' => $recIn ?: 'Digital Verse',
-                'entered_by' => $creator,
-                'created_by_name' => $creator,
-                'created_at' => date('Y-m-d H:i:s'),
-                'entry_timestamp' => date('Y-m-d H:i:s')
-            ]);
-            $saved['payments']++;
-        } catch (Throwable $pe) {
-            $errors[] = "Payment for $agent: " . $pe->getMessage();
-        }
-    }
-
-        out(['success' => true, 'saved' => $saved, 'errors' => $errors]);
+        out([
+            'success' => true,
+            'saved' => $saved,
+            'duplicates' => $duplicates,
+            'errors' => $errors
+        ]);
     } catch (Throwable $mainErr) {
-        error_log("bulk_import fatal error: " . $mainErr->getMessage());
-        out(['success' => false, 'error' => $mainErr->getMessage(), 'saved' => $saved ?? []]);
+        error_log("bulk_import error: " . $mainErr->getMessage());
+        err("Bulk import failed: " . $mainErr->getMessage(), 500);
     }
 }
 
@@ -1804,83 +2157,8 @@ if ($action === 'delete_user') {
 // 11. HIERARCHY MANAGEMENT (REQUIRES ADMIN OR OPS_MANAGER)
 if ($action === 'upsert_ops_node') {
     require_role(['ADMIN', 'OPS_MANAGER']);
-
-    $id = (int)($data['id'] ?? 0);
-    $prevName = clean_str($data['prev_name'] ?? '', 150);
-    $name = clean_str($data['name'] ?? '', 150);
-    if (!$name) err('Ops Manager name is required.');
-    $ecode = clean_str($data['ecode'] ?? '', 50);
-    $rep = clean_str($data['reporting_to'] ?? '', 150);
-    $target = max(0, floatval($data['target'] ?? 0));
-
-    $foundId = null;
-    if ($id > 0) {
-        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE id = ?");
-        $st->execute([$id]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId && $prevName) {
-        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?)");
-        $st->execute([$prevName]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId && $ecode) {
-        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-        $st->execute([$ecode, $ecode]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId) {
-        $st = $pdo->prepare("SELECT id FROM pp_ops_managers WHERE LOWER(TRIM(name)) = LOWER(?)");
-        $st->execute([$name]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId) {
-        $firstToken = explode(' ', strtolower(trim($name)))[0];
-        if (strlen($firstToken) >= 3) {
-            $all = $pdo->query("SELECT id, name FROM pp_ops_managers")->fetchAll();
-            foreach ($all as $item) {
-                $itemFirst = explode(' ', strtolower(trim($item['name'] ?? '')))[0];
-                if ($itemFirst === $firstToken) {
-                    $foundId = $item['id'];
-                    break;
-                }
-            }
-        }
-    }
-
-    if ($foundId) {
-        $st = $pdo->prepare("SELECT * FROM pp_ops_managers WHERE id = ?");
-        $st->execute([$foundId]);
-        $old = $st->fetch();
-        if ($old) {
-            if (!$ecode && !empty($old['ecode'])) $ecode = $old['ecode'];
-            if (!$rep && !empty($old['reporting_to'])) $rep = $old['reporting_to'];
-            if ($target <= 0 && !empty($old['target'])) $target = floatval($old['target']);
-        }
-        $ecodeVal = $ecode ?: null;
-        $repVal = $rep ?: null;
-        $stmt = $pdo->prepare("UPDATE pp_ops_managers SET ecode=?, emp_id=?, name=?, reporting_to=?, reporting_level_1=?, target=?, monthly_target=? WHERE id=?");
-        $stmt->execute([$ecodeVal, $ecodeVal, $name, $repVal, $repVal, $target, $target, $foundId]);
-        if ($ecode) {
-            try {
-                $pdo->prepare("DELETE FROM pp_ops_managers WHERE id != ? AND (LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?))")->execute([$foundId, $ecode, $ecode]);
-            } catch (Throwable $e) {}
-        }
-    } else {
-        $ecodeVal = $ecode ?: null;
-        $repVal = $rep ?: null;
-        $stmt = $pdo->prepare("INSERT INTO pp_ops_managers (ecode, emp_id, name, reporting_to, reporting_level_1, target, monthly_target) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$ecodeVal, $ecodeVal, $name, $repVal, $repVal, $target, $target]);
-    }
-
-    if ($prevName && strcasecmp($prevName, $name) !== 0) {
-        try {
-            $pdo->prepare("UPDATE pp_team_leaders SET reporting_level_1 = ?, ops_manager = ?, reporting_to = ? WHERE LOWER(TRIM(reporting_level_1)) = LOWER(?) OR LOWER(TRIM(ops_manager)) = LOWER(?) OR LOWER(TRIM(reporting_to)) = LOWER(?)")->execute([$name, $name, $name, $prevName, $prevName, $prevName]);
-            $pdo->prepare("UPDATE pp_agents SET ops_manager = ? WHERE LOWER(TRIM(ops_manager)) = LOWER(?)")->execute([$name, $prevName]);
-            $pdo->prepare("UPDATE pp_payments SET ops_manager = ? WHERE LOWER(TRIM(ops_manager)) = LOWER(?)")->execute([$name, $prevName]);
-        } catch (Throwable $e) {}
-    }
-    out(['success' => true]);
+    $newId = upsert_ops_manager_record($pdo, $data);
+    out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_ops_node') {
@@ -1901,82 +2179,8 @@ if ($action === 'remove_ops_node') {
 
 if ($action === 'upsert_tl_node') {
     require_role(['ADMIN', 'OPS_MANAGER']);
-
-    $id = (int)($data['id'] ?? 0);
-    $prevName = clean_str($data['prev_name'] ?? '', 150);
-    $name = clean_str($data['name'] ?? '', 150);
-    if (!$name) err('Team Leader name is required.');
-    $ecode = clean_str($data['ecode'] ?? '', 50);
-    $ops = clean_str($data['ops_manager'] ?? '', 150);
-    $target = max(0, floatval($data['target'] ?? 0));
-
-    $foundId = null;
-    if ($id > 0) {
-        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE id = ?");
-        $st->execute([$id]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId && $prevName) {
-        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?)");
-        $st->execute([$prevName]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId && $ecode) {
-        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-        $st->execute([$ecode, $ecode]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId) {
-        $st = $pdo->prepare("SELECT id FROM pp_team_leaders WHERE LOWER(TRIM(name)) = LOWER(?)");
-        $st->execute([$name]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId) {
-        $firstToken = explode(' ', strtolower(trim($name)))[0];
-        if (strlen($firstToken) >= 3) {
-            $all = $pdo->query("SELECT id, name FROM pp_team_leaders")->fetchAll();
-            foreach ($all as $item) {
-                $itemFirst = explode(' ', strtolower(trim($item['name'] ?? '')))[0];
-                if ($itemFirst === $firstToken) {
-                    $foundId = $item['id'];
-                    break;
-                }
-            }
-        }
-    }
-
-    if ($foundId) {
-        $st = $pdo->prepare("SELECT * FROM pp_team_leaders WHERE id = ?");
-        $st->execute([$foundId]);
-        $old = $st->fetch();
-        if ($old) {
-            if (!$ecode && !empty($old['ecode'])) $ecode = $old['ecode'];
-            if (!$ops && !empty($old['ops_manager'])) $ops = $old['ops_manager'];
-            if ($target <= 0 && !empty($old['target'])) $target = floatval($old['target']);
-        }
-        $ecodeVal = $ecode ?: null;
-        $opsVal = $ops ?: null;
-        $stmt = $pdo->prepare("UPDATE pp_team_leaders SET ecode=?, emp_id=?, name=?, ops_manager=?, reporting_level_1=?, reporting_to=?, target=?, monthly_target=? WHERE id=?");
-        $stmt->execute([$ecodeVal, $ecodeVal, $name, $opsVal, $opsVal, $opsVal, $target, $target, $foundId]);
-        if ($ecode) {
-            try {
-                $pdo->prepare("DELETE FROM pp_team_leaders WHERE id != ? AND (LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?))")->execute([$foundId, $ecode, $ecode]);
-            } catch (Throwable $e) {}
-        }
-    } else {
-        $ecodeVal = $ecode ?: null;
-        $opsVal = $ops ?: null;
-        $stmt = $pdo->prepare("INSERT INTO pp_team_leaders (ecode, emp_id, name, ops_manager, reporting_level_1, reporting_to, target, monthly_target) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$ecodeVal, $ecodeVal, $name, $opsVal, $opsVal, $opsVal, $target, $target]);
-    }
-
-    if ($prevName && strcasecmp($prevName, $name) !== 0) {
-        try {
-            $pdo->prepare("UPDATE pp_agents SET tl = ?, team_leader = ? WHERE LOWER(TRIM(tl)) = LOWER(?) OR LOWER(TRIM(team_leader)) = LOWER(?)")->execute([$name, $name, $prevName, $prevName]);
-            $pdo->prepare("UPDATE pp_payments SET tl = ?, tl_name = ? WHERE LOWER(TRIM(tl)) = LOWER(?) OR LOWER(TRIM(tl_name)) = LOWER(?)")->execute([$name, $name, $prevName, $prevName]);
-        } catch (Throwable $e) {}
-    }
-    out(['success' => true]);
+    $newId = upsert_team_leader_record($pdo, $data);
+    out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_tl_node') {
@@ -1996,52 +2200,8 @@ if ($action === 'remove_tl_node') {
 
 if ($action === 'upsert_agent_node') {
     require_role(['ADMIN', 'OPS_MANAGER']);
-
-    $id = (int)($data['id'] ?? 0);
-    $prevName = clean_str($data['prev_name'] ?? '', 150);
-    $name = clean_str($data['name'] ?? '', 150);
-    if (!$name) err('Agent name is required.');
-    $ecode = clean_str($data['ecode'] ?? '', 50);
-    $ops = clean_str($data['ops_manager'] ?? '', 150);
-    $tl = clean_str($data['tl'] ?? '', 150);
-
-    $foundId = null;
-    if ($id > 0) {
-        $st = $pdo->prepare("SELECT id FROM pp_agents WHERE id = ?");
-        $st->execute([$id]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId && $prevName) {
-        $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?)");
-        $st->execute([$prevName, $prevName]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId && $ecode) {
-        $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(ecode)) = LOWER(?) OR LOWER(TRIM(emp_id)) = LOWER(?)");
-        $st->execute([$ecode, $ecode]);
-        $foundId = $st->fetchColumn();
-    }
-    if (!$foundId) {
-        $st = $pdo->prepare("SELECT id FROM pp_agents WHERE LOWER(TRIM(agent_name)) = LOWER(?) OR LOWER(TRIM(name)) = LOWER(?)");
-        $st->execute([$name, $name]);
-        $foundId = $st->fetchColumn();
-    }
-
-    $ecodeVal = $ecode ?: null;
-    $opsVal = $ops ?: null;
-    $tlVal = $tl ?: null;
-    if ($foundId) {
-        $stmt = $pdo->prepare("UPDATE pp_agents SET ecode=?, emp_id=?, agent_name=?, name=?, ops_manager=?, tl=?, team_leader=? WHERE id=?");
-        $stmt->execute([$ecodeVal, $ecodeVal, $name, $name, $opsVal, $tlVal, $tlVal, $foundId]);
-    } else {
-        $stmt = $pdo->prepare("INSERT INTO pp_agents (ecode, emp_id, agent_name, name, ops_manager, tl, team_leader) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$ecodeVal, $ecodeVal, $name, $name, $opsVal, $tlVal, $tlVal]);
-    }
-
-    if ($prevName && strcasecmp($prevName, $name) !== 0) {
-        $pdo->prepare("UPDATE pp_payments SET agent_name = ? WHERE LOWER(TRIM(agent_name)) = LOWER(?)")->execute([$name, $prevName]);
-    }
-    out(['success' => true]);
+    $newId = upsert_agent_record($pdo, $data);
+    out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_agent_node') {
@@ -2064,54 +2224,9 @@ if ($action === 'remove_agent_node') {
 
 // 12. CLIENTS MANAGEMENT
 if ($action === 'upsert_client_node') {
-    require_auth(); // Allowed during payment recording by any authenticated staff
-
-    $id = (int)($data['id'] ?? 0);
-    $cName = to_title_case(clean_str($data['client_name'] ?? '', 150));
-    $cNum = clean_phone($data['client_number'] ?? '');
-    $email = strtolower(trim(clean_str($data['email_id'] ?? '', 150)));
-    $pan = clean_pan($data['pan_no'] ?? '');
-    $aadhar = clean_aadhar($data['aadhar_no'] ?? '');
-    $state = clean_str($data['state'] ?? '', 100);
-
-    if (!$cName && !$cNum) err('Client Name or Phone Number is required.');
-
-    $kycErr = validate_kyc_rules($cNum, $pan, $aadhar, $email, false);
-    if ($kycErr) {
-        // If coming from import or auto-sync, sanitize invalid fields to null instead of aborting
-        if ($pan !== '' && !is_masked($pan) && !preg_match('/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/', $pan)) $pan = '';
-        if ($aadhar !== '' && !is_masked($aadhar) && strlen(preg_replace('/\D/', '', $aadhar)) !== 12) $aadhar = '';
-        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $email = '';
-        if ($cNum !== '' && !preg_match('/^[6-9]\d{9}$/', $cNum)) $cNum = '';
-        if (!$cName && !$cNum) err($kycErr);
-    }
-
-    if ($id > 0) {
-        $stmt = $pdo->prepare("UPDATE pp_clients SET client_name=?, client_number=?, email_id=?, pan_no=?, aadhar_no=?, state=? WHERE id=?");
-        $stmt->execute([$cName ?: 'Unknown Client', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null, $id]);
-        out(['success' => true]);
-    }
-
-    $check = null;
-    if ($cNum) {
-        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE client_number = ? LIMIT 1");
-        $st->execute([$cNum]);
-        $check = $st->fetchColumn();
-    }
-    if (!$check && $cName) {
-        $st = $pdo->prepare("SELECT id FROM pp_clients WHERE LOWER(TRIM(client_name)) = LOWER(?) LIMIT 1");
-        $st->execute([$cName]);
-        $check = $st->fetchColumn();
-    }
-
-    if ($check) {
-        $stmt = $pdo->prepare("UPDATE pp_clients SET client_name=?, client_number=?, email_id=?, pan_no=?, aadhar_no=?, state=? WHERE id=?");
-        $stmt->execute([$cName ?: 'Unknown Client', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null, $check]);
-    } else {
-        $stmt = $pdo->prepare("INSERT INTO pp_clients (client_name, client_number, email_id, pan_no, aadhar_no, state) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$cName ?: 'Unknown Client', $cNum ?: null, $email ?: null, $pan ?: null, $aadhar ?: null, $state ?: null]);
-    }
-    out(['success' => true]);
+    require_auth();
+    $newId = upsert_client_record($pdo, $data);
+    out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_client_node') {

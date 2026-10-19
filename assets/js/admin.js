@@ -293,12 +293,20 @@ function scanStackedSections(allRows) {
             sig = 'payments';
         } else if ((s.includes('agentname') || s.includes('agent')) && (s.includes('empid') || s.includes('ecode'))) {
             sig = 'agents';
-        } else if (s.includes('clientname') && (s.includes('clientnumber') || s.includes('phone') || s.includes('panno') || s.includes('aadharno') || s.includes('emailid'))) {
+        } else if (s.includes('clientname') && (s.includes('clientnumber') || s.includes('phone') || s.includes('panno') || s.includes('aadharno') || s.includes('emailid') || s.includes('email') || s.includes('state'))) {
             sig = 'clients';
-        } else if ((s.includes('teamleader') || s.includes('teamleadername') || s.includes('tlname')) && s.includes('target')) {
-            sig = 'tls';
-        } else if ((s.includes('opsmanager') || s.includes('opsmanagername')) && s.includes('target')) {
-            sig = 'ops';
+        } else if (s.includes('target') || s.includes('monthlytarget')) {
+            if (s.includes('teamleader') || s.includes('teamleadername') || s.includes('tlname') || s.includes('tl')) {
+                sig = 'tls';
+            } else if (s.includes('opsmanagername')) {
+                sig = 'ops';
+            } else if (s.includes('opsmanager') && s.includes('name')) {
+                sig = 'tls';
+            } else if (s.includes('opsmanager')) {
+                sig = 'ops';
+            } else if (s.includes('reportingto') || s.includes('reportinglevel1')) {
+                sig = 'ops';
+            }
         }
 
         if (sig) {
@@ -431,24 +439,24 @@ async function parseMasterWorkbook(wb, report) {
     // ==========================================
     if (stacked && (stacked.ops || stacked.tls)) {
         if (stacked.ops) {
-            const col = makeColMap(stacked.ops.cells, ['opsmanagername', 'monthlytarget'], ['empid', 'ecode', 'reportinglevel1', 'reportingto']);
+            const col = makeColMap(stacked.ops.cells, ['name', 'target'], ['opsmanagername', 'monthlytarget', 'empid', 'ecode', 'reportinglevel1', 'reportingto']);
             for (const r of stacked.ops.rows) {
-                const name = impClean(r.cells[col['opsmanagername']] || r.cells[2] || '');
+                const name = impClean(r.cells[col['opsmanagername']] || r.cells[col['name']] || r.cells[3] || r.cells[2] || '');
                 if (!name) continue;
                 const ecode = impClean(r.cells[col['empid']] || r.cells[col['ecode']] || r.cells[1] || '');
-                const parent = impClean(r.cells[col['reportinglevel1']] || r.cells[col['reportingto']] || r.cells[3] || '');
-                const target = impNum(r.cells[col['monthlytarget']] || r.cells[4]) || 0;
+                const parent = impClean(r.cells[col['reportinglevel1']] || r.cells[col['reportingto']] || r.cells[4] || r.cells[3] || '');
+                const target = impNum(r.cells[col['monthlytarget']] || r.cells[col['target']] || r.cells[7] || r.cells[4]) || 0;
                 out.ops.push({ name, ecode, parent, target });
             }
         }
         if (stacked.tls) {
-            const col = makeColMap(stacked.tls.cells, ['teamleadername', 'monthlytarget'], ['empid', 'ecode', 'reportinglevel1', 'reportingto']);
+            const col = makeColMap(stacked.tls.cells, ['name', 'target'], ['teamleadername', 'monthlytarget', 'empid', 'ecode', 'reportinglevel1', 'reportingto', 'opsmanager']);
             for (const r of stacked.tls.rows) {
-                const name = impClean(r.cells[col['teamleadername']] || r.cells[2] || '');
+                const name = impClean(r.cells[col['teamleadername']] || r.cells[col['name']] || r.cells[3] || r.cells[2] || '');
                 if (!name) continue;
                 const ecode = impClean(r.cells[col['empid']] || r.cells[col['ecode']] || r.cells[1] || '');
-                const parent = impClean(r.cells[col['reportinglevel1']] || r.cells[col['reportingto']] || r.cells[3] || '');
-                const target = impNum(r.cells[col['monthlytarget']] || r.cells[4]) || 0;
+                const parent = impClean(r.cells[col['opsmanager']] || r.cells[col['reportinglevel1']] || r.cells[col['reportingto']] || r.cells[4] || '');
+                const target = impNum(r.cells[col['monthlytarget']] || r.cells[col['target']] || r.cells[8] || r.cells[4]) || 0;
                 out.tls.push({ name, ecode, parent, target });
             }
         }
@@ -783,7 +791,56 @@ async function parseMasterWorkbook(wb, report) {
     return out;
 }
 
-const impPaymentKey = p => [p.payment_date, impClean(p.ecode || p.e_code), impClean(p.client_number), Number(p.usdt).toFixed(2), Number(p.inr_amount).toFixed(2)].join('|');
+function downloadImportAuditReport(sourceLabel, report, failures, ok, totalCounts) {
+    const lines = [
+        `Import Audit Report - ${sourceLabel}`,
+        `Generated: ${new Date().toLocaleString()}`,
+        `----------------------------------------`,
+        `Summary:`,
+        `- Payments: ${ok.payments} saved, ${totalCounts.duplicates || 0} duplicates skipped, ${totalCounts.paymentsTotal} total in file`,
+        `- Ops Managers: ${ok.ops} saved`,
+        `- Team Leaders: ${ok.tls} saved`,
+        `- Agents: ${ok.agents} saved`,
+        `- Clients: ${ok.clients} saved`,
+        `- Normalised Rows: ${report.normalised || 0}`,
+        ``
+    ];
+    if (failures.length > 0) {
+        lines.push(`Failures & Errors (${failures.length}):`);
+        failures.forEach((f, i) => lines.push(`  ${i + 1}. ${f}`));
+        lines.push(``);
+    }
+    if (report.errors && report.errors.length > 0) {
+        lines.push(`Workbook Skipped Rows (${report.errors.length}):`);
+        report.errors.forEach((e, i) => lines.push(`  ${i + 1}. ${e}`));
+        lines.push(``);
+    }
+    if (report.warnings && report.warnings.length > 0) {
+        lines.push(`Workbook Warnings (${report.warnings.length}):`);
+        report.warnings.forEach((w, i) => lines.push(`  ${i + 1}. ${w}`));
+        lines.push(``);
+    }
+
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `import_audit_report_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+const impPaymentKey = p => [
+    String(p.payment_date || '').slice(0, 10),
+    impClean(p.ecode || p.e_code || p.agent_name).toLowerCase(),
+    impClean(p.client_number || p.client_name).toLowerCase(),
+    Number(p.usdt || 0).toFixed(2),
+    Number(p.inr_amount || 0).toFixed(2),
+    impClean(p.payment_mode || 'P2P').toUpperCase(),
+    impClean(p.received_in || p.received_company || '').toLowerCase()
+].join('|');
 
 async function executeMasterImport(wb, sourceLabel) {
     const report = { errors: [], warnings: [], normalised: 0 };
@@ -873,9 +930,18 @@ async function executeMasterImport(wb, sourceLabel) {
         if (importBtn) importBtn.textContent = 'Saving clients...';
         for (const c of data.clients) await run(`Client ${c.client_name || c.client_number}`, 'clients', 'upsert_client_node', c);
 
+        // Check which payments might have already committed before blind retry
+        const recheck = await api('dashboard', {}).catch(() => ({ rawPayments: [] }));
+        const savedKeys = new Set((recheck.rawPayments || []).map(impPaymentKey));
+        const stillNeed = fresh.filter(p => !savedKeys.has(impPaymentKey(p)));
+        const alreadySaved = fresh.length - stillNeed.length;
+        if (alreadySaved > 0) {
+            ok.payments += alreadySaved;
+        }
+
         let n = 0;
-        for (const p of fresh) {
-            if (importBtn) importBtn.textContent = `Saving payments ${++n}/${fresh.length}...`;
+        for (const p of stillNeed) {
+            if (importBtn) importBtn.textContent = `Saving payments ${++n}/${stillNeed.length}...`;
             await run(`Payment ${p.payment_date} ${p.agent_name}`, 'payments', 'create_payment', p);
         }
     }
@@ -893,11 +959,21 @@ async function executeMasterImport(wb, sourceLabel) {
         localStorage.setItem('pp_ops_managers', JSON.stringify(freshAgents.ops_managers || []));
         localStorage.setItem('pp_team_leaders', JSON.stringify(freshAgents.team_leaders || []));
         localStorage.setItem('pp_clients', JSON.stringify(freshClients.rows || []));
+
+        // Post-import verification
+        console.log(`Database post-import verification: ${(freshDash.rawPayments || []).length} total payments retrieved.`);
     } catch(e) {}
 
     let msg = `Import finished.\n\n• ${ok.payments}/${fresh.length} payments saved\n• ${ok.ops} ops managers, ${ok.tls} team leaders\n• ${ok.agents} agents\n• ${ok.clients} clients`;
     if (failures.length) { msg += `\n\n${failures.length} items FAILED:\n` + failures.slice(0, 8).map(x => '  - ' + x).join('\n'); }
     alert(msg);
+
+    if (failures.length > 0 || report.errors.length > 0) {
+        if (confirm('Would you like to download a detailed audit and error report file?')) {
+            downloadImportAuditReport(sourceLabel, report, failures, ok, { duplicates, paymentsTotal: data.payments.length });
+        }
+    }
+
     load();
     return true;
 }
