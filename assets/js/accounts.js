@@ -40,12 +40,39 @@ async function render() {
         return m === 'P2P' || (m.includes('P2P') && !m.includes('D P2P') && !m.includes('DP2P') && !m.includes('DIRECT') && !m.includes('D-P2P'));
     };
 
+    // Determine current month (YYYY-MM)
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const monthsInPayments = new Set();
+    payments.forEach(p => {
+        if (p.payment_date && p.payment_date.length >= 7) {
+            monthsInPayments.add(p.payment_date.slice(0, 7));
+        }
+    });
+    // Active month: current calendar month if present, or latest month in payment records
+    const activeMonth = monthsInPayments.has(thisMonth)
+        ? thisMonth
+        : (Array.from(monthsInPayments).sort().reverse()[0] || thisMonth);
+
+    let mtdSales = 0;
+    let mtdTx = 0;
     let totalInr = 0;
     let totalUsdt = 0;
+
     payments.forEach(p => {
+        const inr = (parseFloat(p.inr_amount) || 0);
+        const usdt = (parseFloat(p.usdt) || 0);
+        const date = String(p.payment_date || '').trim();
+
+        // Current Month Sales (MTD) - all modes in active month
+        if (date.startsWith(activeMonth)) {
+            mtdSales += inr;
+            mtdTx++;
+        }
+
+        // P2P Collections (for cash handover balance)
         if (isP2P(p.payment_mode)) {
-            totalInr += (parseFloat(p.inr_amount) || 0);
-            totalUsdt += (parseFloat(p.usdt) || 0);
+            totalInr += inr;
+            totalUsdt += usdt;
         }
     });
 
@@ -58,10 +85,23 @@ async function render() {
 
     const balance = totalInr - totalGiven;
 
-    document.getElementById('totalInr').textContent = fmtInr(totalInr);
-    document.getElementById('totalUsdt').textContent = fmtUsdt(totalUsdt) + ' USDT';
-    document.getElementById('totalGiven').textContent = fmtInr(totalGiven);
-    document.getElementById('balance').textContent = fmtInr(balance);
+    const mtdEl = document.getElementById('mtdSales');
+    if (mtdEl) {
+        mtdEl.textContent = fmtInr(mtdSales);
+        mtdEl.title = `${mtdTx} transactions (${activeMonth})`;
+    }
+
+    const totalInrEl = document.getElementById('totalInr');
+    if (totalInrEl) totalInrEl.textContent = fmtInr(totalInr);
+
+    const totalUsdtEl = document.getElementById('totalUsdt');
+    if (totalUsdtEl) totalUsdtEl.textContent = fmtUsdt(totalUsdt) + ' USDT';
+
+    const totalGivenEl = document.getElementById('totalGiven');
+    if (totalGivenEl) totalGivenEl.textContent = fmtInr(totalGiven);
+
+    const balanceEl = document.getElementById('balance');
+    if (balanceEl) balanceEl.textContent = fmtInr(balance);
 
     list.innerHTML = ledger.map(l => `<tr>
         <td>${escapeHtml(l.date || '')}</td>
