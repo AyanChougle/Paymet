@@ -364,7 +364,7 @@ function clear_login_rate_limit(PDO $pdo, string $account) {
 // PII handling: full PAN/Aadhaar only for roles that manage clients
 function can_view_pii(): bool {
     $u = $_SESSION['pp_user'] ?? null;
-    return $u && in_array(strtoupper($u['role'] ?? ''), ['ADMIN', 'OPS_MANAGER'], true);
+    return $u && in_array(strtoupper($u['role'] ?? ''), ['ADMIN', 'OPS_MANAGER', 'ENTRY_USER'], true);
 }
 
 function mask_id($v) {
@@ -2182,13 +2182,13 @@ if ($action === 'delete_user') {
 
 // 11. HIERARCHY MANAGEMENT (REQUIRES ADMIN OR OPS_MANAGER)
 if ($action === 'upsert_ops_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
     $newId = upsert_ops_manager_record($pdo, $data);
     out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_ops_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
 
     $id = (int)($data['id'] ?? 0);
     $name = clean_str($data['name'] ?? '', 150);
@@ -2204,13 +2204,13 @@ if ($action === 'remove_ops_node') {
 }
 
 if ($action === 'upsert_tl_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
     $newId = upsert_team_leader_record($pdo, $data);
     out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_tl_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
 
     $id = (int)($data['id'] ?? 0);
     $name = clean_str($data['name'] ?? '', 150);
@@ -2225,13 +2225,13 @@ if ($action === 'remove_tl_node') {
 }
 
 if ($action === 'upsert_agent_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
     $newId = upsert_agent_record($pdo, $data);
     out(['success' => true, 'id' => $newId]);
 }
 
 if ($action === 'remove_agent_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
 
     $id = (int)($data['id'] ?? 0);
     $name = clean_str($data['name'] ?? '', 150);
@@ -2256,7 +2256,7 @@ if ($action === 'upsert_client_node') {
 }
 
 if ($action === 'remove_client_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
 
     $id = (int)($data['id'] ?? 0);
     $cNum = clean_str($data['client_number'] ?? '', 50);
@@ -2393,7 +2393,7 @@ if ($action === 'remove_account_node') {
 
 // 14. TARGETS UPDATE (REQUIRES ADMIN OR OPS_MANAGER)
 if ($action === 'update_target_node') {
-    require_role(['ADMIN', 'OPS_MANAGER']);
+    require_role(['ADMIN', 'OPS_MANAGER', 'ENTRY_USER']);
 
     $type = strtoupper(clean_str($data['type'] ?? '', 10));
     $name = clean_str($data['name'] ?? '', 150);
