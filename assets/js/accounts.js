@@ -1,8 +1,14 @@
 const form = document.getElementById('cashForm');
 const list = document.getElementById('ledgerList');
+const foot = document.getElementById('ledgerFoot');
 const msg = document.getElementById('msg');
 const importAccountsFile = document.getElementById('importAccountsFile');
 const exportAccountsBtn = document.getElementById('exportAccountsBtn');
+
+const fromInput = document.getElementById('from');
+const toInput = document.getElementById('to');
+const dateSortOrder = document.getElementById('dateSortOrder');
+const clearBtn = document.getElementById('clearBtn');
 
 if (form && form.date) form.date.value = new Date().toISOString().slice(0, 10);
 
@@ -10,6 +16,22 @@ const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minim
 const fmtUsdt = (num) => Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 let cachedLedger = [];
+let currentFilteredLedger = [];
+
+function normalizeDateStr(d) {
+    if (!d) return '';
+    d = String(d).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+    const parts = d.split(/[-/]/);
+    if (parts.length === 3) {
+        if (parts[0].length === 4) {
+            return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        } else if (parts[2].length === 4) {
+            return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+    }
+    return d.slice(0, 10);
+}
 
 async function getLedgerData() {
     try {
@@ -21,6 +43,76 @@ async function getLedgerData() {
         cachedLedger = JSON.parse(localStorage.getItem('pp_accounts') || '[]');
         return cachedLedger;
     }
+}
+
+function applyFiltersAndRenderTable() {
+    const from = fromInput ? fromInput.value.trim() : '';
+    const to = toInput ? toInput.value.trim() : '';
+    const sortOrder = dateSortOrder ? dateSortOrder.value : 'desc';
+
+    let filtered = (cachedLedger || []).filter(l => {
+        const d = normalizeDateStr(l.date);
+        if (from && d && d < from) return false;
+        if (to && d && d > to) return false;
+        return true;
+    });
+
+    filtered.sort((a, b) => {
+        const dateA = normalizeDateStr(a.date);
+        const dateB = normalizeDateStr(b.date);
+        let cmp = dateA.localeCompare(dateB);
+        if (cmp === 0) cmp = Number(a.id || 0) - Number(b.id || 0);
+        return sortOrder === 'asc' ? cmp : -cmp;
+    });
+
+    currentFilteredLedger = filtered;
+
+    let filteredTotal = 0;
+    filtered.forEach(l => {
+        filteredTotal += (parseFloat(l.amount) || 0);
+    });
+
+    if (list) {
+        list.innerHTML = filtered.map(l => `<tr>
+        <td>${escapeHtml(l.date || '')}</td>
+        <td style="color:var(--danger); font-weight:700;">${fmtInr(l.amount)}</td>
+        <td>${escapeHtml(l.remarks || '-')}</td>
+        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteEntry(${l.id || 0}, '${(l.date||'').replace(/'/g, "\\'")}', ${parseFloat(l.amount)||0})">Delete</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No handover entries match the selected filters.</td></tr>';
+    }
+
+    if (foot) {
+        if (filtered.length > 0) {
+            foot.innerHTML = `<tr>
+        <td><strong>Total (${filtered.length} ${filtered.length === 1 ? 'entry' : 'entries'})</strong></td>
+        <td style="color:var(--danger); font-weight:700;">${fmtInr(filteredTotal)}</td>
+        <td colspan="2"></td>
+    </tr>`;
+        } else {
+            foot.innerHTML = '';
+        }
+    }
+}
+
+// Hook filter listeners
+if (fromInput) {
+    fromInput.addEventListener('input', applyFiltersAndRenderTable);
+    fromInput.addEventListener('change', applyFiltersAndRenderTable);
+}
+if (toInput) {
+    toInput.addEventListener('input', applyFiltersAndRenderTable);
+    toInput.addEventListener('change', applyFiltersAndRenderTable);
+}
+if (dateSortOrder) {
+    dateSortOrder.addEventListener('change', applyFiltersAndRenderTable);
+}
+if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+        if (fromInput) fromInput.value = '';
+        if (toInput) toInput.value = '';
+        if (dateSortOrder) dateSortOrder.value = 'desc';
+        applyFiltersAndRenderTable();
+    });
 }
 
 async function render() {
@@ -76,10 +168,8 @@ async function render() {
         }
     });
 
-    ledger.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-
     let totalGiven = 0;
-    ledger.forEach(l => {
+    (cachedLedger || []).forEach(l => {
         totalGiven += (parseFloat(l.amount) || 0);
     });
 
@@ -103,12 +193,7 @@ async function render() {
     const balanceEl = document.getElementById('balance');
     if (balanceEl) balanceEl.textContent = fmtInr(balance);
 
-    list.innerHTML = ledger.map(l => `<tr>
-        <td>${escapeHtml(l.date || '')}</td>
-        <td style="color:var(--danger); font-weight:700;">${fmtInr(l.amount)}</td>
-        <td>${escapeHtml(l.remarks || '-')}</td>
-        <td><button class="ghost danger" style="padding:4px 8px; font-size:11px;" onclick="deleteEntry(${l.id || 0}, '${(l.date||'').replace(/'/g, "\\'")}', ${parseFloat(l.amount)||0})">Delete</button></td>
-    </tr>`).join('') || '<tr><td colspan="4" class="text-muted" style="text-align:center; padding:20px;">No handover entries recorded.</td></tr>';
+    applyFiltersAndRenderTable();
 }
 
 window.deleteEntry = async function(id, date, amount) {
@@ -184,10 +269,10 @@ if (importAccountsFile) {
 // Export Handover Ledger
 if (exportAccountsBtn) {
     exportAccountsBtn.onclick = function() {
-        const ledger = cachedLedger || [];
-        if (!ledger.length) return alert('No ledger records to export.');
+        const toExport = (currentFilteredLedger && currentFilteredLedger.length) ? currentFilteredLedger : (cachedLedger || []);
+        if (!toExport.length) return alert('No ledger records to export.');
 
-        const ws = XLSX.utils.json_to_sheet(ledger);
+        const ws = XLSX.utils.json_to_sheet(toExport);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Accounts Handover');
         XLSX.writeFile(wb, `Accounts_Handover_Ledger_${new Date().toISOString().slice(0, 10)}.xlsx`);
