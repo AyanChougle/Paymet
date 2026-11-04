@@ -71,6 +71,23 @@
             <div class="panel-head">
                 <h2>Handover History Ledger</h2>
             </div>
+         <section class="filters">
+            <label>
+                From
+                <input type="date" id="from">
+            </label>
+            <label>
+                To
+                <input type="date" id="to">
+            </label>
+            <label>
+                Sort Date
+                <select id="dateSortOrder">
+                    <option value="desc" selected>Newest First (Descending)</option>
+                    <option value="asc">Oldest First (Ascending)</option>
+                </select>
+            </label>
+         </section>    
             <div class="table-wrap">
                 <table>
                     <thead>
