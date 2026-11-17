@@ -6,7 +6,7 @@
     <title>Payment Reports | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=21">
+    <link rel="stylesheet" href="assets/css/app.css?v=27">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -41,6 +41,30 @@
                 <button id="exportExcelBtn" class="btn-excel">Export Excel (.xlsx)</button>
             </div>
         </header>
+
+        <!-- Top KPIs Strip -->
+        <section class="kpi-grid" id="kpiGrid" style="margin-bottom: 24px;">
+            <div class="kpi-card">
+                <small id="kpiInrTitle">Current Month Sales (MTD)</small>
+                <strong id="kpiInr">₹0.00</strong>
+                <div class="kpi-sub" id="kpiInrSub">0 transactions</div>
+            </div>
+            <div class="kpi-card">
+                <small>Total USDT Volume</small>
+                <strong id="kpiUsdt">0.00 USDT</strong>
+                <div class="kpi-sub">Total Collected</div>
+            </div>
+            <div class="kpi-card">
+                <small>Direct P2P vs P2P</small>
+                <strong id="kpiModes">-</strong>
+                <div class="kpi-sub" id="kpiModesSub">Bifurcation</div>
+            </div>
+            <div class="kpi-card">
+                <small>Company Split (DV / WK)</small>
+                <strong id="kpiCompany">-</strong>
+                <div class="kpi-sub" id="kpiCompanySub">Digital Verse / World of Crypto</div>
+            </div>
+        </section>
 
         <section class="filters">
             <label>
@@ -129,8 +153,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=21"></script>
-    <script src="assets/js/auth.js?v=21"></script>
-    <script src="assets/js/reports.js?v=21"></script>
+    <script src="assets/js/api.js?v=27"></script>
+    <script src="assets/js/auth.js?v=27"></script>
+    <script src="assets/js/reports.js?v=27"></script>
 </body>
 </html>

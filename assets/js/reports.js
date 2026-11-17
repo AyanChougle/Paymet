@@ -29,7 +29,8 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
-const fmtInr = (num) => '₹' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtInr = (num) => '₹ ' + Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtInrInt = (num) => '₹ ' + Number(num || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const fmtUsdt = (num) => Number(num || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function getAgentEcode(agentName) {
@@ -191,9 +192,89 @@ function applyFilters() {
         return sortDirection === 'asc' ? comparison : -comparison;
     });
 
+    updateKpis(filteredRows);
     currentPage = 1;
     renderTable();
 }
+
+function updateKpis(rows) {
+    let totalInr = 0;
+    let totalUsdt = 0;
+    const totalTx = rows.length;
+
+    let dP2pUsdt = 0;
+    let p2pUsdt = 0;
+    let dP2pInr = 0;
+    let p2pInr = 0;
+
+    let dvInr = 0;
+    let wkInr = 0;
+    let dvUsdt = 0;
+    let wkUsdt = 0;
+
+    rows.forEach(r => {
+        const inr = parseFloat(r.inr_amount || 0);
+        const usdt = parseFloat(r.usdt || 0);
+        const mode = String(r.payment_mode || 'P2P').trim();
+        const comp = String(r.received_in || 'Digital Verse').trim();
+
+        totalInr += inr;
+        totalUsdt += usdt;
+
+        const isDP2P = mode.toUpperCase().includes('D') && mode.toUpperCase().includes('P2P');
+        if (isDP2P) {
+            dP2pUsdt += usdt;
+            dP2pInr += inr;
+        } else {
+            p2pUsdt += usdt;
+            p2pInr += inr;
+        }
+
+        const compLower = comp.toLowerCase();
+        if (compLower.includes('world') || compLower.includes('wk') || compLower.includes('krypto')) {
+            wkInr += inr;
+            wkUsdt += usdt;
+        } else {
+            dvInr += inr;
+            dvUsdt += usdt;
+        }
+    });
+
+    const kpiInrEl = document.getElementById('kpiInr');
+    const kpiInrSubEl = document.getElementById('kpiInrSub');
+    const kpiInrTitleEl = document.getElementById('kpiInrTitle');
+    const kpiUsdtEl = document.getElementById('kpiUsdt');
+    const kpiModesEl = document.getElementById('kpiModes');
+    const kpiModesSubEl = document.getElementById('kpiModesSub');
+    const kpiCompanyEl = document.getElementById('kpiCompany');
+    const kpiCompanySubEl = document.getElementById('kpiCompanySub');
+
+    const fromVal = fromInput ? fromInput.value.trim() : '';
+    const toVal = toInput ? toInput.value.trim() : '';
+    const searchVal = searchFilter ? searchFilter.value.trim() : '';
+    const modeVal = modeFilter ? modeFilter.value.trim() : '';
+    const compVal = companyFilter ? companyFilter.value.trim() : '';
+    const isFiltered = !!(fromVal || toVal || searchVal || modeVal || compVal);
+
+    if (kpiInrTitleEl) {
+        if (fromVal || toVal) {
+            kpiInrTitleEl.textContent = 'Filtered Period Sales';
+        } else if (isFiltered) {
+            kpiInrTitleEl.textContent = 'Filtered Sales';
+        } else {
+            kpiInrTitleEl.textContent = 'Current Month Sales (MTD)';
+        }
+    }
+
+    if (kpiInrEl) kpiInrEl.textContent = fmtInr(totalInr);
+    if (kpiInrSubEl) kpiInrSubEl.textContent = `${totalTx} transactions`;
+    if (kpiUsdtEl) kpiUsdtEl.textContent = `${fmtUsdt(totalUsdt)} USDT`;
+    if (kpiModesEl) kpiModesEl.textContent = `${fmtUsdt(dP2pUsdt)} / ${fmtUsdt(p2pUsdt)}`;
+    if (kpiModesSubEl) kpiModesSubEl.textContent = `Direct: ${fmtInrInt(dP2pInr)} | P2P: ${fmtInrInt(p2pInr)}`;
+    if (kpiCompanyEl) kpiCompanyEl.textContent = `${fmtInrInt(dvInr)} / ${fmtInrInt(wkInr)}`;
+    if (kpiCompanySubEl) kpiCompanySubEl.textContent = `DV: ${fmtUsdt(dvUsdt)} U | WK: ${fmtUsdt(wkUsdt)} U`;
+}
+
 
 function renderTable() {
     const total = filteredRows.length;
