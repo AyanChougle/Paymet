@@ -216,16 +216,9 @@ function updateKpis(rows) {
     const compVal = companyFilter ? companyFilter.value.trim() : '';
     const hasCustomFilter = !!(fromVal || toVal || searchVal || modeVal || compVal);
 
-    // Determine current month (YYYY-MM)
+    // Determine current calendar month strictly (YYYY-MM)
     const thisMonth = new Date().toISOString().slice(0, 7);
-    const monthsInRows = new Set();
-    allRows.forEach(r => {
-        const d = String(r.payment_date || '').slice(0, 7);
-        if (d && d.length === 7) monthsInRows.add(d);
-    });
-    const activeMonth = monthsInRows.has(thisMonth)
-        ? thisMonth
-        : (Array.from(monthsInRows).sort().reverse()[0] || thisMonth);
+    const activeMonth = thisMonth;
 
     // If custom filters are applied (date, search, mode, company), use those filtered rows
     // Otherwise, respect currentKpiScope: 'mtd' (Current Month) vs 'all' (All Time)
