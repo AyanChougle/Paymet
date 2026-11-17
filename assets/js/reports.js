@@ -197,10 +197,50 @@ function applyFilters() {
     renderTable();
 }
 
+let currentKpiScope = 'mtd'; // 'mtd' by default, or 'all'
+
+window.setKpiScope = function(scope) {
+    currentKpiScope = scope;
+    const btnMtd = document.getElementById('kpiScopeMtd');
+    const btnAll = document.getElementById('kpiScopeAll');
+    if (btnMtd) btnMtd.className = scope === 'mtd' ? 'tab-btn active' : 'tab-btn';
+    if (btnAll) btnAll.className = scope === 'all' ? 'tab-btn active' : 'tab-btn';
+    updateKpis(filteredRows);
+};
+
 function updateKpis(rows) {
+    const fromVal = fromInput ? fromInput.value.trim() : '';
+    const toVal = toInput ? toInput.value.trim() : '';
+    const searchVal = searchFilter ? searchFilter.value.trim() : '';
+    const modeVal = modeFilter ? modeFilter.value.trim() : '';
+    const compVal = companyFilter ? companyFilter.value.trim() : '';
+    const hasCustomFilter = !!(fromVal || toVal || searchVal || modeVal || compVal);
+
+    // Determine current month (YYYY-MM)
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const monthsInRows = new Set();
+    allRows.forEach(r => {
+        const d = String(r.payment_date || '').slice(0, 7);
+        if (d && d.length === 7) monthsInRows.add(d);
+    });
+    const activeMonth = monthsInRows.has(thisMonth)
+        ? thisMonth
+        : (Array.from(monthsInRows).sort().reverse()[0] || thisMonth);
+
+    // If custom filters are applied (date, search, mode, company), use those filtered rows
+    // Otherwise, respect currentKpiScope: 'mtd' (Current Month) vs 'all' (All Time)
+    let targetRows = rows;
+    if (!hasCustomFilter) {
+        if (currentKpiScope === 'mtd') {
+            targetRows = rows.filter(r => String(r.payment_date || '').startsWith(activeMonth));
+        } else {
+            targetRows = rows;
+        }
+    }
+
     let totalInr = 0;
     let totalUsdt = 0;
-    const totalTx = rows.length;
+    const totalTx = targetRows.length;
 
     let dP2pUsdt = 0;
     let p2pUsdt = 0;
@@ -212,7 +252,7 @@ function updateKpis(rows) {
     let dvUsdt = 0;
     let wkUsdt = 0;
 
-    rows.forEach(r => {
+    targetRows.forEach(r => {
         const inr = parseFloat(r.inr_amount || 0);
         const usdt = parseFloat(r.usdt || 0);
         const mode = String(r.payment_mode || 'P2P').trim();
@@ -249,18 +289,13 @@ function updateKpis(rows) {
     const kpiCompanyEl = document.getElementById('kpiCompany');
     const kpiCompanySubEl = document.getElementById('kpiCompanySub');
 
-    const fromVal = fromInput ? fromInput.value.trim() : '';
-    const toVal = toInput ? toInput.value.trim() : '';
-    const searchVal = searchFilter ? searchFilter.value.trim() : '';
-    const modeVal = modeFilter ? modeFilter.value.trim() : '';
-    const compVal = companyFilter ? companyFilter.value.trim() : '';
-    const isFiltered = !!(fromVal || toVal || searchVal || modeVal || compVal);
-
     if (kpiInrTitleEl) {
         if (fromVal || toVal) {
             kpiInrTitleEl.textContent = 'Filtered Period Sales';
-        } else if (isFiltered) {
+        } else if (hasCustomFilter) {
             kpiInrTitleEl.textContent = 'Filtered Sales';
+        } else if (currentKpiScope === 'all') {
+            kpiInrTitleEl.textContent = 'All Time Total Sales';
         } else {
             kpiInrTitleEl.textContent = 'Current Month Sales (MTD)';
         }

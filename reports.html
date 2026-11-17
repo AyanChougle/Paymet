@@ -6,7 +6,7 @@
     <title>Payment Reports | Payment Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="alternate icon" href="favicon.ico">
-    <link rel="stylesheet" href="assets/css/app.css?v=27">
+    <link rel="stylesheet" href="assets/css/app.css?v=28">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -42,27 +42,36 @@
             </div>
         </header>
 
-        <!-- Top KPIs Strip -->
-        <section class="kpi-grid" id="kpiGrid" style="margin-bottom: 24px;">
-            <div class="kpi-card">
-                <small id="kpiInrTitle">Current Month Sales (MTD)</small>
-                <strong id="kpiInr">₹0.00</strong>
-                <div class="kpi-sub" id="kpiInrSub">0 transactions</div>
+                <!-- Top KPIs Strip -->
+        <section id="kpiSection" style="margin-bottom: 24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                <span style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.8px;">Performance Summary</span>
+                <div class="section-tabs" style="margin:0; padding:2px; display:inline-flex; gap:4px;">
+                    <button type="button" id="kpiScopeMtd" class="tab-btn active" onclick="setKpiScope('mtd')">Current Month (MTD)</button>
+                    <button type="button" id="kpiScopeAll" class="tab-btn" onclick="setKpiScope('all')">All Time Total</button>
+                </div>
             </div>
-            <div class="kpi-card">
-                <small>Total USDT Volume</small>
-                <strong id="kpiUsdt">0.00 USDT</strong>
-                <div class="kpi-sub">Total Collected</div>
-            </div>
-            <div class="kpi-card">
-                <small>Direct P2P vs P2P</small>
-                <strong id="kpiModes">-</strong>
-                <div class="kpi-sub" id="kpiModesSub">Bifurcation</div>
-            </div>
-            <div class="kpi-card">
-                <small>Company Split (DV / WK)</small>
-                <strong id="kpiCompany">-</strong>
-                <div class="kpi-sub" id="kpiCompanySub">Digital Verse / World of Crypto</div>
+            <div class="kpi-grid" id="kpiGrid" style="margin-bottom:0;">
+                <div class="kpi-card">
+                    <small id="kpiInrTitle">Current Month Sales (MTD)</small>
+                    <strong id="kpiInr">₹0.00</strong>
+                    <div class="kpi-sub" id="kpiInrSub">0 transactions</div>
+                </div>
+                <div class="kpi-card">
+                    <small>Total USDT Volume</small>
+                    <strong id="kpiUsdt">0.00 USDT</strong>
+                    <div class="kpi-sub">Total Collected</div>
+                </div>
+                <div class="kpi-card">
+                    <small>Direct P2P vs P2P</small>
+                    <strong id="kpiModes">-</strong>
+                    <div class="kpi-sub" id="kpiModesSub">Bifurcation</div>
+                </div>
+                <div class="kpi-card">
+                    <small>Company Split (DV / WK)</small>
+                    <strong id="kpiCompany">-</strong>
+                    <div class="kpi-sub" id="kpiCompanySub">Digital Verse / World of Crypto</div>
+                </div>
             </div>
         </section>
 
@@ -153,8 +162,8 @@
     </main>
 
     <script src="assets/js/theme.js"></script>
-    <script src="assets/js/api.js?v=27"></script>
-    <script src="assets/js/auth.js?v=27"></script>
-    <script src="assets/js/reports.js?v=27"></script>
+    <script src="assets/js/api.js?v=28"></script>
+    <script src="assets/js/auth.js?v=28"></script>
+    <script src="assets/js/reports.js?v=28"></script>
 </body>
 </html>
